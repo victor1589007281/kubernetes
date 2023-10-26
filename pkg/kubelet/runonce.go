@@ -42,6 +42,9 @@ type RunPodResult struct {
 	Err error
 }
 
+// 解读：会实时地发送过来 pod 最新的配置信息（podCfg.Updates()）
+// 创建pod并周期性更新pod信息
+
 // RunOnce polls from one configuration update and run the associated pods.
 func (kl *Kubelet) RunOnce(updates <-chan kubetypes.PodUpdate) ([]RunPodResult, error) {
 	ctx := context.Background()
@@ -117,22 +120,26 @@ func (kl *Kubelet) runPod(ctx context.Context, pod *v1.Pod, retryDelay time.Dura
 	delay := retryDelay
 	retry := 0
 	for !isTerminal {
+		// 解读：获取pod的状态
 		status, err := kl.containerRuntime.GetPodStatus(ctx, pod.UID, pod.Name, pod.Namespace)
 		if err != nil {
 			return fmt.Errorf("unable to get status for pod %q: %v", format.Pod(pod), err)
 		}
 
+		// 解读：判断pod是否所有容器都是running的
 		if kl.isPodRunning(pod, status) {
 			klog.InfoS("Pod's containers running", "pod", klog.KObj(pod))
 			return nil
 		}
 		klog.InfoS("Pod's containers not running: syncing", "pod", klog.KObj(pod))
 
+		// 解读：创建mirror pod
 		klog.InfoS("Creating a mirror pod for static pod", "pod", klog.KObj(pod))
 		if err := kl.mirrorPodClient.CreateMirrorPod(pod); err != nil {
 			klog.ErrorS(err, "Failed creating a mirror pod", "pod", klog.KObj(pod))
 		}
 		mirrorPod, _ := kl.podManager.GetMirrorPodByPod(pod)
+		// 解读：同步pod的状态
 		if isTerminal, err = kl.SyncPod(ctx, kubetypes.SyncPodUpdate, pod, mirrorPod, status); err != nil {
 			return fmt.Errorf("error syncing pod %q: %v", format.Pod(pod), err)
 		}

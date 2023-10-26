@@ -32,7 +32,9 @@ import (
 )
 
 func main() {
+	// 解读：解析参数，设置参数关联的执行方法，启动方法就在这里
 	command := app.NewKubeletCommand()
+	// 启动kubelet
 	code := cli.Run(command)
 	os.Exit(code)
 }

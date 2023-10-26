@@ -276,6 +276,7 @@ type Dependencies struct {
 	useLegacyCadvisorStats bool
 }
 
+// 解读：创建一个协程，持续监听API SERVER发过来的pods
 // makePodSourceConfig creates a config.PodConfig from the given
 // KubeletConfiguration or returns an error.
 func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, kubeDeps *Dependencies, nodeName types.NodeName, nodeHasSynced func() bool) (*config.PodConfig, error) {
@@ -288,6 +289,7 @@ func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, ku
 		}
 	}
 
+	// 解读：初始化监听管道结构
 	// source of all configuration
 	cfg := config.NewPodConfig(config.PodConfigNotificationIncremental, kubeDeps.Recorder, kubeDeps.PodStartupLatencyTracker)
 
@@ -306,6 +308,7 @@ func makePodSourceConfig(kubeCfg *kubeletconfiginternal.KubeletConfiguration, ku
 		config.NewSourceURL(kubeCfg.StaticPodURL, manifestURLHeader, nodeName, kubeCfg.HTTPCheckFrequency.Duration, cfg.Channel(ctx, kubetypes.HTTPSource))
 	}
 
+	// 解读：创建一个协程，持续监听API SERVER发过来的pods
 	if kubeDeps.KubeClient != nil {
 		klog.InfoS("Adding apiserver pod source")
 		config.NewSourceApiserver(kubeDeps.KubeClient, nodeName, nodeHasSynced, cfg.Channel(ctx, kubetypes.ApiserverSource))
@@ -400,6 +403,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		klog.InfoS("Kubelet is running in standalone mode, will skip API server sync")
 	}
 
+	// 解读：创建一个协程，持续监听API SERVER发过来的pods
 	if kubeDeps.PodConfig == nil {
 		var err error
 		kubeDeps.PodConfig, err = makePodSourceConfig(kubeCfg, kubeDeps, nodeName, nodeHasSynced)
@@ -1497,6 +1501,13 @@ func (kl *Kubelet) initializeModules() error {
 
 // initializeRuntimeDependentModules will initialize internal modules that require the container runtime to be up.
 func (kl *Kubelet) initializeRuntimeDependentModules() {
+	// 解读：启动container advisor
+	/*
+		用于监控和收集运行在Kubernetes集群上的容器的资源使用和性能指标。
+		它提供有关CPU使用率、内存使用率、文件系统使用率、网络统计等方面的信息。
+		cAdvisor从每个容器收集数据，并通过API公开这些数据，使用户能够监视和分析容器资源利用情况。
+		它在管理和优化Kubernetes环境中的容器化工作负载方面起着关键作用。
+	*/
 	if err := kl.cadvisor.Start(); err != nil {
 		// Fail kubelet and rely on the babysitter to retry starting kubelet.
 		klog.ErrorS(err, "Failed to start cAdvisor")
@@ -1548,6 +1559,7 @@ func (kl *Kubelet) initializeRuntimeDependentModules() {
 // Run starts the kubelet reacting to config updates
 func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 	ctx := context.Background()
+	//解读：检查日志服务器是否未定义。如果未定义，则使用HTTP包创建一个新的文件服务器，并将其设置为日志服务器。日志服务器处理日志的请求
 	if kl.logServer == nil {
 		file := http.FileServer(http.Dir(nodeLogDir))
 		if utilfeature.DefaultFeatureGate.Enabled(features.NodeLogQuery) && kl.kubeletConfiguration.EnableSystemLogQuery {
@@ -1587,17 +1599,20 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 		klog.InfoS("No API server defined - no node status update will be sent")
 	}
 
+	//解读：如果定义了云资源同步管理器，则启动一个新的goroutine来持续运行同步管理器。
 	// Start the cloud provider sync manager
 	if kl.cloudResourceSyncManager != nil {
 		go kl.cloudResourceSyncManager.Run(wait.NeverStop)
 	}
 
+	//解读：初始化kubelet的内部模块
 	if err := kl.initializeModules(); err != nil {
 		kl.recorder.Eventf(kl.nodeRef, v1.EventTypeWarning, events.KubeletSetupFailed, err.Error())
 		klog.ErrorS(err, "Failed to initialize internal modules")
 		os.Exit(1)
 	}
 
+	//解读：启动卷管理器。卷管理器处理与卷相关的操作
 	// Start volume manager
 	go kl.volumeManager.Run(kl.sourcesReady, wait.NeverStop)
 
@@ -1611,35 +1626,45 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 		// Introduce some small jittering to ensure that over time the requests won't start
 		// accumulating at approximately the same time from the set of nodes due to priority and
 		// fairness effect.
+		//解读：按照固定时间间隔向API服务器报告状态
 		go wait.JitterUntil(kl.syncNodeStatus, kl.nodeStatusUpdateFrequency, 0.04, true, wait.NeverStop)
+		//解读：用于在初始化过程中提供更及时的状态更新，并在节点准备就绪后退出
 		go kl.fastStatusUpdateOnce()
 
+		//解读：开始同步节点租约
 		// start syncing lease
 		go kl.nodeLeaseController.Run(context.Background())
 	}
+	//解读：以固定时间间隔更新运行时信息
 	go wait.Until(kl.updateRuntimeUp, 5*time.Second, wait.NeverStop)
 
 	// Set up iptables util rules
 	if kl.makeIPTablesUtilChains {
+		//解读：初始化用于管理iptables规则的网络工具
 		kl.initNetworkUtil()
 	}
 
+	//解读：启动组件同步循环，处理kubelet的各个组件的同步
 	// Start component sync loops.
 	kl.statusManager.Start()
 
 	// Start syncing RuntimeClasses if enabled.
 	if kl.runtimeClassManager != nil {
+		//解读：开始同步运行时类别
 		kl.runtimeClassManager.Start(wait.NeverStop)
 	}
 
+	//解读：启动Pod生命周期事件生成器，用于生成Pod的生命周期事件
 	// Start the pod lifecycle event generator.
 	kl.pleg.Start()
 
+	//解读：如果启用了"EventedPLEG"功能开关，则启动eventedPLEG，它是Pod生命周期事件生成器的更高效版本
 	// Start eventedPLEG only if EventedPLEG feature gate is enabled.
 	if utilfeature.DefaultFeatureGate.Enabled(features.EventedPLEG) {
 		kl.eventedPleg.Start()
 	}
 
+	//解读：启动同步循环，该循环不断处理Pod的更新并处理同步Pod的操作
 	kl.syncLoop(ctx, updates, kl)
 }
 
@@ -2553,7 +2578,7 @@ func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 				}
 				// For new pod, checkpoint the resource values at which the Pod has been admitted
 				if err := kl.statusManager.SetPodAllocation(podCopy); err != nil {
-					//TODO(vinaykul,InPlacePodVerticalScaling): Can we recover from this in some way? Investigate
+					// TODO(vinaykul,InPlacePodVerticalScaling): Can we recover from this in some way? Investigate
 					klog.ErrorS(err, "SetPodAllocation failed", "pod", klog.KObj(pod))
 				}
 			} else {
@@ -2812,7 +2837,7 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) *v1.Pod {
 	if fit {
 		// Update pod resource allocation checkpoint
 		if err := kl.statusManager.SetPodAllocation(updatedPod); err != nil {
-			//TODO(vinaykul,InPlacePodVerticalScaling): Can we recover from this in some way? Investigate
+			// TODO(vinaykul,InPlacePodVerticalScaling): Can we recover from this in some way? Investigate
 			klog.ErrorS(err, "SetPodAllocation failed", "pod", klog.KObj(updatedPod))
 			return pod
 		}
@@ -2820,7 +2845,7 @@ func (kl *Kubelet) handlePodResourcesResize(pod *v1.Pod) *v1.Pod {
 	if resizeStatus != "" {
 		// Save resize decision to checkpoint
 		if err := kl.statusManager.SetPodResizeStatus(updatedPod.UID, resizeStatus); err != nil {
-			//TODO(vinaykul,InPlacePodVerticalScaling): Can we recover from this in some way? Investigate
+			// TODO(vinaykul,InPlacePodVerticalScaling): Can we recover from this in some way? Investigate
 			klog.ErrorS(err, "SetPodResizeStatus failed", "pod", klog.KObj(updatedPod))
 			return pod
 		}

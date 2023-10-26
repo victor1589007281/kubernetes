@@ -33,8 +33,10 @@ import (
 // WaitForAPIServerSyncPeriod is the period between checks for the node list/watch initial sync
 const WaitForAPIServerSyncPeriod = 1 * time.Second
 
+// 解读：创建一个协程，持续监听API SERVER发过来的pods
 // NewSourceApiserver creates a config source that watches and pulls from the apiserver.
 func NewSourceApiserver(c clientset.Interface, nodeName types.NodeName, nodeHasSynced func() bool, updates chan<- interface{}) {
+	// 解读：通过client set创建一个list watch
 	lw := cache.NewListWatchFromClient(c.CoreV1().RESTClient(), "pods", metav1.NamespaceAll, fields.OneTermEqualSelector("spec.nodeName", string(nodeName)))
 
 	// The Reflector responsible for watching pods at the apiserver should be run only after
@@ -50,6 +52,7 @@ func NewSourceApiserver(c clientset.Interface, nodeName types.NodeName, nodeHasS
 			klog.V(4).InfoS("node sync has not completed yet")
 		}
 		klog.InfoS("Watching apiserver")
+		// 解读：然后把监听到的pods，持续往管道中填充
 		newSourceApiserverFromLW(lw, updates)
 	}()
 }

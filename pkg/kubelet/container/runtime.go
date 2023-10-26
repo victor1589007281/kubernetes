@@ -63,6 +63,14 @@ type ImageStats struct {
 	TotalStorageBytes uint64
 }
 
+/*
+解读：
+下面这个就是CRI，也就是容器运行时接口
+CRI是一个API规范，定义了Kubernetes与容器运行时之间的接口，
+使得Kubernetes能够管理和与不同的容器运行时（如Docker、Containerd、CRI-O等）进行交互。
+它为Kubernetes提供了一个标准化的方式，在集群中创建、启动、停止和监控容器。
+*/
+
 // Runtime interface defines the interfaces that should be implemented
 // by a container runtime.
 // Thread safety is required from implementations of this interface.
@@ -288,7 +296,7 @@ type Container struct {
 	// Hash of the container over fields with Resources field zero'd out.
 	// NOTE: This is needed during alpha and beta so that containers using Resources are
 	// not unexpectedly restarted when InPlacePodVerticalScaling feature-gate is toggled.
-	//TODO(vinaykul,InPlacePodVerticalScaling): Remove this in GA+1 and make HashWithoutResources to become Hash.
+	// TODO(vinaykul,InPlacePodVerticalScaling): Remove this in GA+1 and make HashWithoutResources to become Hash.
 	HashWithoutResources uint64
 	// State is the state of the container.
 	State State
