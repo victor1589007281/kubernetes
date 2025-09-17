@@ -171,12 +171,200 @@ const (
 
 ## Job 控制器整体架构
 
-上方的架构图展示了 Job 控制器在 Kubernetes 集群中的完整架构，包括：
+### 1. 系统架构全景图
 
-1. **Controller Manager 组件**：Job Controller、CronJob Controller、TTL Controller
-2. **Worker Node 组件**：Kubelet、Pod Manager、Container Runtime
-3. **Job 资源**：Job、CronJob、Pod Template、ConfigMap、Secret
-4. **执行模式**：Non-Indexed、Indexed、One-off、Parallel Jobs
+```mermaid
+graph TB
+    subgraph "**Kubernetes 集群架构**"
+        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
+        
+        subgraph "**控制平面**"
+            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+            
+            API[**API Server**<br/>• Job API 验证<br/>• 事件记录<br/>• 状态存储]
+            ETCD[**etcd**<br/>• Job 状态持久化<br/>• Pod 状态追踪<br/>• 配置存储]
+            
+            subgraph "**Controller Manager**"
+                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
+                
+                JOB_CTRL[**Job Controller**<br/>• Pod 生命周期管理<br/>• 并发控制<br/>• 失败重试机制]
+                
+                CRONJOB_CTRL[**CronJob Controller**<br/>• 定时任务调度<br/>• Job 创建管理<br/>• 历史清理]
+                
+                TTL_CTRL[**TTL Controller**<br/>• 资源自动清理<br/>• 过期Job删除<br/>• 垃圾回收]
+            end
+        end
+        
+        subgraph "**工作节点**"
+            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
+            
+            KUBELET[**Kubelet**<br/>• Pod 创建执行<br/>• 容器状态监控<br/>• 资源管理]
+            
+            CRI[**Container Runtime**<br/>• 容器生命周期<br/>• 镜像管理<br/>• 网络配置]
+            
+            subgraph "**Job Pods**"
+                style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
+                
+                POD1[**Worker Pod 1**<br/>• 批处理任务<br/>• 索引: 0<br/>• 状态: Running]
+                POD2[**Worker Pod 2**<br/>• 批处理任务<br/>• 索引: 1<br/>• 状态: Completed]
+                PODN[**Worker Pod N**<br/>• 批处理任务<br/>• 索引: N<br/>• 状态: Failed]
+            end
+        end
+        
+        subgraph "**存储和配置**"
+            style subgraph fill:#f0f0f0,stroke:#666,stroke-width:2px
+            
+            CONFIGMAP[**ConfigMap**<br/>• 应用配置<br/>• 环境变量<br/>• 配置文件]
+            
+            SECRET[**Secret**<br/>• 认证信息<br/>• 密钥数据<br/>• 证书文件]
+            
+            PVC[**PVC**<br/>• 持久化存储<br/>• 数据共享<br/>• 结果输出]
+        end
+    end
+    
+    API <--> ETCD
+    JOB_CTRL --> API
+    CRONJOB_CTRL --> API
+    TTL_CTRL --> API
+    
+    KUBELET <--> API
+    KUBELET --> CRI
+    
+    CRI --> POD1
+    CRI --> POD2
+    CRI --> PODN
+    
+    POD1 --> CONFIGMAP
+    POD1 --> SECRET
+    POD1 --> PVC
+```
+
+### 2. Job 控制器内部架构
+
+```mermaid
+graph TB
+    subgraph "**Job Controller 内部架构**"
+        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
+        
+        subgraph "**事件监听层**"
+            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+            
+            JOB_INFORMER[**Job Informer**<br/>• 监听Job变化<br/>• 缓存Job状态<br/>• 事件分发]
+            
+            POD_INFORMER[**Pod Informer**<br/>• 监听Pod变化<br/>• 缓存Pod状态<br/>• 状态更新]
+        end
+        
+        subgraph "**工作队列层**"
+            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
+            
+            MAIN_QUEUE[**主工作队列**<br/>• Job同步任务<br/>• 限流重试<br/>• 错误处理]
+            
+            ORPHAN_QUEUE[**孤儿Pod队列**<br/>• 清理无主Pod<br/>• 终结器管理<br/>• 资源回收]
+        end
+        
+        subgraph "**期望状态管理**"
+            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
+            
+            EXPECTATIONS[**Controller Expectations**<br/>• Pod创建期望<br/>• Pod删除期望<br/>• 状态同步]
+            
+            FINALIZER_EXP[**Finalizer Expectations**<br/>• 终结器追踪<br/>• Pod清理状态<br/>• UID追踪]
+        end
+        
+        subgraph "**控制逻辑层**"
+            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
+            
+            SYNC_LOGIC[**同步逻辑**<br/>• Job状态计算<br/>• Pod数量调节<br/>• 完成检查]
+            
+            POD_CONTROL[**Pod 控制器**<br/>• Pod创建删除<br/>• 标签管理<br/>• 事件记录]
+            
+            BACKOFF_STORE[**退避存储**<br/>• 失败记录<br/>• 指数退避<br/>• 延迟管理]
+        end
+        
+        subgraph "**状态更新层**"
+            style subgraph fill:#f0f0f0,stroke:#666,stroke-width:2px
+            
+            STATUS_UPDATER[**状态更新器**<br/>• Job状态同步<br/>• 条件更新<br/>• 指标上报]
+        end
+    end
+    
+    JOB_INFORMER --> MAIN_QUEUE
+    POD_INFORMER --> MAIN_QUEUE
+    POD_INFORMER --> ORPHAN_QUEUE
+    
+    MAIN_QUEUE --> SYNC_LOGIC
+    SYNC_LOGIC --> EXPECTATIONS
+    SYNC_LOGIC --> POD_CONTROL
+    SYNC_LOGIC --> BACKOFF_STORE
+    
+    POD_CONTROL --> STATUS_UPDATER
+    BACKOFF_STORE --> POD_CONTROL
+    FINALIZER_EXP --> ORPHAN_QUEUE
+```
+
+### 3. 执行模式架构对比
+
+```mermaid
+graph TB
+    subgraph "**Job 执行模式架构对比**"
+        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
+        
+        subgraph "**Non-Indexed Job**"
+            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+            
+            NI_JOB[**Non-Indexed Job**<br/>• completions: 6<br/>• parallelism: 3<br/>• 同质化Pod]
+            
+            subgraph "**Pod实例**"
+                NI_POD1[**Pod-abc12**<br/>• 无索引标识<br/>• 处理任意任务<br/>• 工作队列模式]
+                NI_POD2[**Pod-def34**<br/>• 无索引标识<br/>• 处理任意任务<br/>• 工作队列模式]
+                NI_POD3[**Pod-ghi56**<br/>• 无索引标识<br/>• 处理任意任务<br/>• 工作队列模式]
+            end
+        end
+        
+        subgraph "**Indexed Job**"
+            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
+            
+            I_JOB[**Indexed Job**<br/>• completions: 6<br/>• parallelism: 3<br/>• completionMode: Indexed]
+            
+            subgraph "**索引化Pod**"
+                I_POD0[**Pod-0-xyz**<br/>• JOB_COMPLETION_INDEX=0<br/>• 处理数据分片0<br/>• 固定任务映射]
+                I_POD1[**Pod-1-abc**<br/>• JOB_COMPLETION_INDEX=1<br/>• 处理数据分片1<br/>• 固定任务映射]
+                I_POD2[**Pod-2-def**<br/>• JOB_COMPLETION_INDEX=2<br/>• 处理数据分片2<br/>• 固定任务映射]
+            end
+        end
+        
+        subgraph "**Work Queue Job**"
+            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
+            
+            WQ_JOB[**Work Queue Job**<br/>• 无completions限制<br/>• parallelism: 4<br/>• 动态任务分配]
+            
+            subgraph "**工作器Pod**"
+                WQ_POD1[**Worker-1**<br/>• 监听消息队列<br/>• 动态获取任务<br/>• 处理完成退出]
+                WQ_POD2[**Worker-2**<br/>• 监听消息队列<br/>• 动态获取任务<br/>• 处理完成退出]
+                WQ_POD3[**Worker-3**<br/>• 监听消息队列<br/>• 动态获取任务<br/>• 处理完成退出]
+                WQ_POD4[**Worker-4**<br/>• 监听消息队列<br/>• 动态获取任务<br/>• 处理完成退出]
+            end
+        end
+    end
+    
+    NI_JOB --> NI_POD1
+    NI_JOB --> NI_POD2
+    NI_JOB --> NI_POD3
+    
+    I_JOB --> I_POD0
+    I_JOB --> I_POD1
+    I_JOB --> I_POD2
+    
+    WQ_JOB --> WQ_POD1
+    WQ_JOB --> WQ_POD2
+    WQ_JOB --> WQ_POD3
+    WQ_JOB --> WQ_POD4
+```
+
+上述架构图展示了 Job 控制器在 Kubernetes 集群中的完整架构，包括：
+
+1. **系统架构**：控制平面组件、工作节点、存储配置的完整交互关系
+2. **内部架构**：Job Controller 内部的事件监听、队列管理、期望状态、控制逻辑等模块
+3. **执行模式**：Non-Indexed、Indexed、Work Queue 等不同执行模式的架构差异
 
 ---
 
@@ -283,7 +471,89 @@ func (jm *Controller) processNextWorkItem(ctx context.Context) bool {
 }
 ```
 
-### 3. Job 同步处理
+### 3. Job 同步流程时序图
+
+```mermaid
+sequenceDiagram
+    participant INFORMER as **Informer**
+    participant QUEUE as **工作队列**
+    participant CONTROLLER as **Job Controller**
+    participant EXPECTATIONS as **期望状态**
+    participant POD_CONTROL as **Pod Controller**
+    participant API as **API Server**
+    participant KUBELET as **Kubelet**
+    
+    Note over INFORMER,KUBELET: **Job 同步完整流程**
+    
+    INFORMER->>QUEUE: **1. Job/Pod 事件入队**
+    QUEUE->>CONTROLLER: **2. 获取同步任务**
+    
+    Note over CONTROLLER: **3. 同步处理开始**
+    CONTROLLER->>CONTROLLER: **4. 获取Job和Pod列表**
+    CONTROLLER->>CONTROLLER: **5. 计算实际状态**
+    Note right of CONTROLLER: **• Active Pods: 2**<br/>**• Succeeded: 1**<br/>**• Failed: 0**
+    
+    CONTROLLER->>EXPECTATIONS: **6. 检查期望状态**
+    EXPECTATIONS->>CONTROLLER: **7. 返回期望值**
+    Note right of EXPECTATIONS: **• 期望创建: 0**<br/>**• 期望删除: 0**<br/>**• 可以继续同步**
+    
+    alt **需要创建Pod**
+        CONTROLLER->>POD_CONTROL: **8a. 创建新Pod**
+        POD_CONTROL->>EXPECTATIONS: **9a. 增加创建期望**
+        POD_CONTROL->>API: **10a. 调用创建Pod API**
+        API->>KUBELET: **11a. 通知Pod调度**
+        KUBELET->>API: **12a. 更新Pod状态**
+    else **需要删除Pod**
+        CONTROLLER->>POD_CONTROL: **8b. 删除多余Pod**
+        POD_CONTROL->>EXPECTATIONS: **9b. 增加删除期望**
+        POD_CONTROL->>API: **10b. 调用删除Pod API**
+        API->>KUBELET: **11b. 通知Pod终止**
+        KUBELET->>API: **12b. 确认Pod删除**
+    else **状态已满足**
+        Note over CONTROLLER: **8c. 无需Pod操作**
+    end
+    
+    CONTROLLER->>CONTROLLER: **13. 计算Job状态**
+    Note right of CONTROLLER: **• 检查完成条件**<br/>**• 检查失败条件**<br/>**• 更新Job状态**
+    
+    CONTROLLER->>API: **14. 更新Job状态**
+    API->>INFORMER: **15. 状态变更通知**
+    
+    Note over CONTROLLER: **16. 同步完成**
+```
+
+### 4. Job 状态转换图
+
+```mermaid
+stateDiagram-v2
+    [*] --> **创建中**
+    
+    **创建中** --> **等待调度** : Job创建成功
+    **等待调度** --> **运行中** : Pod开始调度
+    **等待调度** --> **失败** : 调度失败超过限制
+    
+    **运行中** --> **成功完成** : 达到completions目标
+    **运行中** --> **失败** : 失败次数超过backoffLimit
+    **运行中** --> **超时失败** : 超过activeDeadlineSeconds
+    **运行中** --> **暂停** : 手动暂停Job
+    
+    **暂停** --> **运行中** : 恢复执行
+    **暂停** --> **失败** : 手动终止
+    
+    **成功完成** --> **清理完成** : TTL过期
+    **失败** --> **清理完成** : TTL过期
+    **超时失败** --> **清理完成** : TTL过期
+    
+    **清理完成** --> [*]
+    
+    note right of **运行中** : **Pod状态追踪:**<br/>**• Active: 运行中Pod数**<br/>**• Succeeded: 成功Pod数**<br/>**• Failed: 失败Pod数**
+    
+    note right of **成功完成** : **完成条件:**<br/>**• succeeded >= completions**<br/>**• 所有Pod正常退出**
+    
+    note right of **失败** : **失败条件:**<br/>**• failed > backoffLimit**<br/>**• Pod失败策略触发**
+```
+
+### 5. Job 同步处理源码分析
 
 ```go
 // syncJob 同步单个 Job
@@ -331,6 +601,73 @@ func (jm *Controller) syncJob(ctx context.Context, key string) (forget bool, rEr
     // 执行 Job 同步逻辑
     return true, jm.syncJobWithContext(ctx, syncCtx)
 }
+```
+
+### 6. Job 控制循环模块交互图
+
+```mermaid
+graph TB
+    subgraph "**Job 控制循环核心模块**"
+        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
+        
+        subgraph "**输入模块**"
+            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+            
+            JOB_LISTER[**Job Lister**<br/>• 获取Job对象<br/>• 缓存查询<br/>• 版本检查]
+            POD_LISTER[**Pod Lister**<br/>• 获取Pod列表<br/>• 标签选择器<br/>• 状态过滤]
+        end
+        
+        subgraph "**状态计算模块**"
+            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
+            
+            STATUS_CALC[**状态计算器**<br/>• Active Pod计数<br/>• Succeeded Pod计数<br/>• Failed Pod计数]
+            
+            CONDITION_CALC[**条件计算器**<br/>• 完成条件检查<br/>• 失败条件检查<br/>• 超时条件检查]
+            
+            INDEX_TRACKER[**索引追踪器**<br/>• 成功索引记录<br/>• 失败索引记录<br/>• 待处理索引]
+        end
+        
+        subgraph "**决策模块**"
+            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
+            
+            POD_MANAGER[**Pod管理决策**<br/>• 创建Pod数量<br/>• 删除Pod选择<br/>• 替换策略]
+            
+            BACKOFF_MGR[**退避管理器**<br/>• 失败记录<br/>• 延迟计算<br/>• 重试策略]
+            
+            POLICY_ENGINE[**策略引擎**<br/>• Pod失败策略<br/>• 并发控制<br/>• 资源限制]
+        end
+        
+        subgraph "**执行模块**"
+            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
+            
+            POD_CREATOR[**Pod创建器**<br/>• Pod规格生成<br/>• 标签设置<br/>• 环境变量注入]
+            
+            POD_DELETER[**Pod删除器**<br/>• 删除策略<br/>• 终结器管理<br/>• 清理确认]
+            
+            STATUS_WRITER[**状态写入器**<br/>• Job状态更新<br/>• 条件设置<br/>• 事件记录]
+        end
+    end
+    
+    JOB_LISTER --> STATUS_CALC
+    POD_LISTER --> STATUS_CALC
+    
+    STATUS_CALC --> CONDITION_CALC
+    STATUS_CALC --> INDEX_TRACKER
+    
+    CONDITION_CALC --> POD_MANAGER
+    INDEX_TRACKER --> POD_MANAGER
+    
+    POD_MANAGER --> BACKOFF_MGR
+    POD_MANAGER --> POLICY_ENGINE
+    
+    BACKOFF_MGR --> POD_CREATOR
+    BACKOFF_MGR --> POD_DELETER
+    POLICY_ENGINE --> POD_CREATOR
+    POLICY_ENGINE --> POD_DELETER
+    
+    POD_CREATOR --> STATUS_WRITER
+    POD_DELETER --> STATUS_WRITER
+    CONDITION_CALC --> STATUS_WRITER
 ```
 
 ---

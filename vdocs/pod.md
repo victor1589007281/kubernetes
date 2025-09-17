@@ -344,16 +344,19 @@ sequenceDiagram
     Note over KUBELET: Pod 创建过程
     KUBELET->>API: 7. 监听 Pod 变化
     KUBELET->>KUBELET: 8. Pod 准入控制
-    KUBELET->>CRI: 9. 创建 Pod Sandbox
-    KUBELET->>CRI: 10. 拉取镜像
-    KUBELET->>CRI: 11. 创建 Init 容器
-    KUBELET->>CRI: 12. 启动 Init 容器
+    KUBELET->>KUBELET: 9. 等待 PVC 绑定完成
+    KUBELET->>KUBELET: 10. 等待存储卷挂载
+    KUBELET->>CRI: 11. 创建 Pod Sandbox
+    KUBELET->>CRI: 12. 拉取镜像
+    KUBELET->>CRI: 13. 创建 Init 容器
+    KUBELET->>CRI: 14. 启动 Init 容器
     
     Note over KUBELET: Init 容器完成后
-    KUBELET->>CRI: 13. 创建应用容器
-    KUBELET->>CRI: 14. 启动应用容器
-    KUBELET->>API: 15. 更新 Pod 状态
-    API->>ETCD: 16. 存储状态更新
+    KUBELET->>CRI: 15. 创建应用容器
+    KUBELET->>CRI: 16. 启动应用容器
+    KUBELET->>KUBELET: 17. 启动健康检查探针
+    KUBELET->>API: 18. 更新 Pod 状态和条件
+    API->>ETCD: 19. 存储状态更新
 ```
 
 ### 调度决策过程
@@ -630,6 +633,490 @@ Kubelet 的 `SyncPod` 方法是 Pod 管理的核心：
 5. **获取镜像拉取密钥**: 处理私有镜像仓库认证
 6. **调用容器运行时**: 通过 CRI 创建 Pod 和容器
 7. **配置网络**: 设置 Pod 网络和 QoS
+
+---
+
+## Pod 存储卷处理机制
+
+### 1. PVC 绑定与调度集成
+
+在 Pod 调度阶段，VolumeBinding 调度插件确保 Pod 的存储需求得到满足。基于源码 `pkg/scheduler/framework/plugins/volumebinding/volume_binding.go`：
+
+```go
+// PreBind 阶段：绑定 Pod 所需的卷
+func (pl *VolumeBinding) PreBind(ctx context.Context, cs *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
+    s, err := getStateData(cs)
+    if err != nil {
+        return framework.AsStatus(err)
+    }
+    
+    if s.allBound {
+        // 所有卷都已绑定，无需处理
+        return nil
+    }
+    
+    // 获取该节点的卷信息
+    podVolumes, ok := s.podVolumesByNode[nodeName]
+    if !ok {
+        return framework.AsStatus(fmt.Errorf("no pod volumes found for node %q", nodeName))
+    }
+    
+    // 执行卷绑定
+    err = pl.Binder.BindPodVolumes(ctx, pod, podVolumes)
+    if err != nil {
+        return framework.AsStatus(err)
+    }
+    
+    return nil
+}
+```
+
+### 2. Volume Manager 架构
+
+基于源码 `pkg/kubelet/volumemanager/volume_manager.go`，Volume Manager 是 Kubelet 中负责卷管理的核心组件：
+
+```mermaid
+graph TB
+    subgraph "**Volume Manager 架构**"
+        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
+        
+        subgraph "**期望状态管理**"
+            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+            
+            DSW_POPULATOR[**DesiredStateOfWorld Populator**<br/>• 解析 Pod 规格<br/>• 填充期望状态<br/>• 处理卷引用]
+            DSW[**DesiredStateOfWorld**<br/>• 维护期望的卷状态<br/>• 卷到Pod映射<br/>• 挂载路径管理]
+        end
+        
+        subgraph "**实际状态管理**"
+            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
+            
+            ASW[**ActualStateOfWorld**<br/>• 跟踪实际卷状态<br/>• 挂载点信息<br/>• 设备路径管理]
+        end
+        
+        subgraph "**协调器**"
+            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
+            
+            RECONCILER[**Reconciler**<br/>• 状态协调循环<br/>• 触发挂载/卸载操作<br/>• 错误重试机制]
+            OP_EXECUTOR[**Operation Executor**<br/>• 异步操作执行<br/>• 卷插件调用<br/>• 操作序列化]
+        end
+    end
+    
+    DSW_POPULATOR --> DSW
+    DSW --> RECONCILER
+    ASW --> RECONCILER
+    RECONCILER --> OP_EXECUTOR
+```
+
+### 3. 卷等待和挂载流程
+
+```go
+// WaitForAttachAndMount 等待所有卷挂载完成
+func (vm *volumeManager) WaitForAttachAndMount(ctx context.Context, pod *v1.Pod) error {
+    if pod == nil {
+        return nil
+    }
+    
+    expectedVolumes := getExpectedVolumes(pod)
+    if len(expectedVolumes) == 0 {
+        // 没有卷需要验证
+        return nil
+    }
+    
+    klog.V(3).InfoS("Waiting for volumes to attach and mount for pod", "pod", klog.KObj(pod))
+    uniquePodName := util.GetUniquePodName(pod)
+    
+    // 重新处理 Pod 以支持动态更新的卷
+    vm.desiredStateOfWorldPopulator.ReprocessPod(uniquePodName)
+    
+    // 轮询等待卷挂载完成，超时时间为 2 分钟
+    err := wait.PollUntilContextTimeout(
+        ctx,
+        podAttachAndMountRetryInterval,  // 300ms
+        podAttachAndMountTimeout,        // 2分钟+3秒
+        true,
+        vm.verifyVolumesMountedFunc(uniquePodName, expectedVolumes))
+    
+    if err != nil {
+        // 收集未挂载的卷信息用于错误报告
+        unmountedVolumes := vm.getUnmountedVolumes(uniquePodName, expectedVolumes)
+        unattachedVolumes := vm.getUnattachedVolumes(uniquePodName)
+        volumesNotInDSW := vm.getVolumesNotInDSW(uniquePodName, expectedVolumes)
+        
+        return fmt.Errorf(
+            "unmounted volumes=%v, unattached volumes=%v, failed to process volumes=%v: %w",
+            unmountedVolumes, unattachedVolumes, volumesNotInDSW, err)
+    }
+    
+    klog.V(3).InfoS("All volumes are attached and mounted for pod", "pod", klog.KObj(pod))
+    return nil
+}
+```
+
+### 4. PVC 绑定状态检查
+
+```go
+// isPVCFullyBound 检查 PVC 是否完全绑定
+func (b *volumeBinder) isPVCFullyBound(pvc *v1.PersistentVolumeClaim) bool {
+    // PVC 必须同时满足以下条件才算完全绑定：
+    // 1. 指定了 VolumeName（绑定到具体的 PV）
+    // 2. 包含绑定完成的注解
+    return pvc.Spec.VolumeName != "" && 
+           metav1.HasAnnotation(pvc.ObjectMeta, volume.AnnBindCompleted)
+}
+```
+
+### 5. 卷处理时序图
+
+```mermaid
+sequenceDiagram
+    participant SCHEDULER as **调度器**
+    participant VOLUME_BINDER as **卷绑定器**
+    participant PV_CONTROLLER as **PV 控制器**
+    participant KUBELET as **Kubelet**
+    participant VOLUME_MGR as **Volume Manager**
+    participant STORAGE as **存储系统**
+    
+    Note over SCHEDULER,STORAGE: **Pod 存储卷处理完整流程**
+    
+    SCHEDULER->>VOLUME_BINDER: **1. PreFilter: 获取 Pod 卷需求**
+    VOLUME_BINDER->>VOLUME_BINDER: **2. Filter: 检查节点存储能力**
+    SCHEDULER->>VOLUME_BINDER: **3. PreBind: 触发卷绑定**
+    
+    VOLUME_BINDER->>PV_CONTROLLER: **4. 绑定 PVC 到 PV**
+    PV_CONTROLLER->>PV_CONTROLLER: **5. 双向绑定（PV ↔ PVC）**
+    PV_CONTROLLER->>VOLUME_BINDER: **6. 绑定完成确认**
+    
+    KUBELET->>VOLUME_MGR: **7. 检测到新 Pod，注册卷需求**
+    VOLUME_MGR->>VOLUME_MGR: **8. DesiredStateOfWorld 更新**
+    VOLUME_MGR->>VOLUME_MGR: **9. Reconciler 协调状态差异**
+    
+    VOLUME_MGR->>STORAGE: **10. Attach: 将卷附加到节点**
+    STORAGE->>VOLUME_MGR: **11. 附加完成，返回设备路径**
+    VOLUME_MGR->>STORAGE: **12. Mount: 挂载到 Pod 目录**
+    STORAGE->>VOLUME_MGR: **13. 挂载完成确认**
+    
+    VOLUME_MGR->>KUBELET: **14. 通知卷已准备就绪**
+    KUBELET->>KUBELET: **15. 创建 Pod Sandbox**
+    KUBELET->>KUBELET: **16. 启动容器**
+```
+
+---
+
+## Pod 健康检查与状态探测
+
+### 1. 探针类型概述
+
+Kubernetes 支持三种类型的健康检查探针：
+
+#### 1.1 存活性探针 (Liveness Probe)
+- **目的**：确定容器是否正在运行
+- **失败行为**：重启容器
+- **适用场景**：检测死锁、内存泄漏等问题
+
+#### 1.2 就绪性探针 (Readiness Probe)  
+- **目的**：确定容器是否准备好接收流量
+- **失败行为**：从 Service 端点中移除 Pod
+- **适用场景**：应用启动、配置加载、依赖服务检查
+
+#### 1.3 启动探针 (Startup Probe)
+- **目的**：确定容器内应用程序是否已启动
+- **失败行为**：重启容器，阻止其他探针执行
+- **适用场景**：慢启动容器、遗留应用适配
+
+### 2. 探针数据结构
+
+基于源码 `staging/src/k8s.io/api/core/v1/types.go`：
+
+```go
+// Probe 描述健康检查探针
+type Probe struct {
+    // 探针处理器（HTTP、TCP、执行命令等）
+    ProbeHandler `json:",inline"`
+    
+    // 初始延迟时间（秒）
+    InitialDelaySeconds int32 `json:"initialDelaySeconds,omitempty"`
+    
+    // 超时时间（秒）
+    TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+    
+    // 检查周期（秒）
+    PeriodSeconds int32 `json:"periodSeconds,omitempty"`
+    
+    // 成功阈值
+    SuccessThreshold int32 `json:"successThreshold,omitempty"`
+    
+    // 失败阈值
+    FailureThreshold int32 `json:"failureThreshold,omitempty"`
+    
+    // 探针失败时的优雅终止期限
+    TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
+}
+```
+
+### 3. 探针管理器架构
+
+基于源码 `pkg/kubelet/prober/prober_manager.go`：
+
+```go
+// Manager 接口定义探针管理功能
+type Manager interface {
+    // 添加 Pod 的探针
+    AddPod(pod *v1.Pod)
+    
+    // 移除 Pod 的探针
+    RemovePod(pod *v1.Pod)
+    
+    // 停止存活性和启动探针
+    StopLivenessAndStartup(pod *v1.Pod)
+    
+    // 更新 Pod 状态
+    UpdatePodStatus(podUID types.UID, podStatus *v1.PodStatus)
+}
+
+// AddPod 为 Pod 中的每个容器创建探针 Worker
+func (m *manager) AddPod(pod *v1.Pod) {
+    m.workerLock.Lock()
+    defer m.workerLock.Unlock()
+    
+    key := probeKey{podUID: pod.UID}
+    for _, c := range append(pod.Spec.Containers, getRestartableInitContainers(pod)...) {
+        key.containerName = c.Name
+        
+        // 创建启动探针 Worker
+        if c.StartupProbe != nil {
+            key.probeType = startup
+            w := newWorker(m, startup, pod, c)
+            m.workers[key] = w
+            go w.run()
+        }
+        
+        // 创建就绪性探针 Worker
+        if c.ReadinessProbe != nil {
+            key.probeType = readiness
+            w := newWorker(m, readiness, pod, c)
+            m.workers[key] = w
+            go w.run()
+        }
+        
+        // 创建存活性探针 Worker
+        if c.LivenessProbe != nil {
+            key.probeType = liveness
+            w := newWorker(m, liveness, pod, c)
+            m.workers[key] = w
+            go w.run()
+        }
+    }
+}
+```
+
+### 4. 探针执行流程
+
+```mermaid
+graph TB
+    subgraph "**探针执行架构**"
+        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
+        
+        subgraph "**探针管理器**"
+            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
+            
+            PROBE_MGR[**Probe Manager**<br/>• 管理所有探针 Worker<br/>• 协调探针生命周期<br/>• 处理探针结果]
+            
+            RESULTS_MGR[**Results Manager**<br/>• 缓存探针结果<br/>• 状态变化通知<br/>• 历史记录管理]
+        end
+        
+        subgraph "**探针 Worker**"
+            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
+            
+            STARTUP_WORKER[**Startup Probe Worker**<br/>• 启动时探测<br/>• 阻塞其他探针<br/>• 失败时重启容器]
+            
+            LIVENESS_WORKER[**Liveness Probe Worker**<br/>• 定期存活性检查<br/>• 检测容器健康状态<br/>• 触发容器重启]
+            
+            READINESS_WORKER[**Readiness Probe Worker**<br/>• 就绪性检查<br/>• 控制流量路由<br/>• Service 端点管理]
+        end
+        
+        subgraph "**探针执行器**"
+            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
+            
+            HTTP_PROBER[**HTTP Prober**<br/>• HTTP/HTTPS 请求<br/>• 状态码检查<br/>• 超时控制]
+            
+            TCP_PROBER[**TCP Prober**<br/>• TCP 连接检查<br/>• 端口可达性测试<br/>• 连接超时处理]
+            
+            EXEC_PROBER[**Exec Prober**<br/>• 容器内命令执行<br/>• 退出码检查<br/>• 标准输出处理]
+        end
+        
+        subgraph "**状态更新**"
+            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
+            
+            STATUS_MGR[**Status Manager**<br/>• Pod 状态聚合<br/>• 条件更新<br/>• API 同步]
+            
+            KUBELET[**Kubelet**<br/>• 容器生命周期管理<br/>• 重启决策<br/>• 事件生成]
+        end
+    end
+    
+    PROBE_MGR --> STARTUP_WORKER
+    PROBE_MGR --> LIVENESS_WORKER  
+    PROBE_MGR --> READINESS_WORKER
+    
+    STARTUP_WORKER --> HTTP_PROBER
+    STARTUP_WORKER --> TCP_PROBER
+    STARTUP_WORKER --> EXEC_PROBER
+    
+    LIVENESS_WORKER --> HTTP_PROBER
+    LIVENESS_WORKER --> TCP_PROBER
+    LIVENESS_WORKER --> EXEC_PROBER
+    
+    READINESS_WORKER --> HTTP_PROBER
+    READINESS_WORKER --> TCP_PROBER
+    READINESS_WORKER --> EXEC_PROBER
+    
+    HTTP_PROBER --> RESULTS_MGR
+    TCP_PROBER --> RESULTS_MGR
+    EXEC_PROBER --> RESULTS_MGR
+    
+    RESULTS_MGR --> STATUS_MGR
+    STATUS_MGR --> KUBELET
+```
+
+### 5. Pod 条件 (Conditions) 管理
+
+基于源码 `pkg/apis/core/types.go`：
+
+```go
+// Pod 条件类型常量
+const (
+    // Pod 已被调度到节点
+    PodScheduled PodConditionType = "PodScheduled"
+    
+    // Pod 能够服务请求，应该被添加到负载均衡池
+    PodReady PodConditionType = "Ready"
+    
+    // 所有 Init 容器成功完成
+    PodInitialized PodConditionType = "Initialized"
+    
+    // Pod 中所有容器都准备就绪
+    ContainersReady PodConditionType = "ContainersReady"
+    
+    // Pod 即将因中断而终止
+    DisruptionTarget PodConditionType = "DisruptionTarget"
+)
+
+// Pod 条件结构
+type PodCondition struct {
+    Type               PodConditionType // 条件类型
+    Status             ConditionStatus  // 条件状态 (True/False/Unknown)
+    LastProbeTime      metav1.Time     // 最后探测时间
+    LastTransitionTime metav1.Time     // 最后转换时间
+    Reason             string          // 简短原因
+    Message            string          // 详细消息
+}
+```
+
+### 6. 状态更新机制
+
+```go
+// UpdatePodCondition 更新 Pod 条件状态
+func UpdatePodCondition(status *v1.PodStatus, condition *v1.PodCondition) bool {
+    condition.LastTransitionTime = metav1.Now()
+    
+    // 查找现有条件
+    conditionIndex, oldCondition := GetPodCondition(status, condition.Type)
+    
+    if oldCondition == nil {
+        // 添加新条件
+        status.Conditions = append(status.Conditions, *condition)
+        return true
+    }
+    
+    // 检查条件是否发生变化
+    if condition.Status == oldCondition.Status {
+        condition.LastTransitionTime = oldCondition.LastTransitionTime
+    }
+    
+    isEqual := condition.Status == oldCondition.Status &&
+               condition.Reason == oldCondition.Reason &&
+               condition.Message == oldCondition.Message &&
+               condition.LastProbeTime.Equal(&oldCondition.LastProbeTime) &&
+               condition.LastTransitionTime.Equal(&oldCondition.LastTransitionTime)
+    
+    status.Conditions[conditionIndex] = *condition
+    return !isEqual
+}
+```
+
+### 7. 探针状态转换图
+
+```mermaid
+stateDiagram-v2
+    [*] --> **初始化**
+    
+    **初始化** --> **启动探针检查** : 容器启动
+    **启动探针检查** --> **启动探针成功** : 探针成功
+    **启动探针检查** --> **启动探针失败** : 探针失败
+    **启动探针失败** --> **容器重启** : 超过失败阈值
+    **容器重启** --> **初始化**
+    
+    **启动探针成功** --> **就绪性探针检查** : 启动探针通过
+    **就绪性探针检查** --> **就绪性探针成功** : 探针成功
+    **就绪性探针检查** --> **就绪性探针失败** : 探针失败
+    **就绪性探针失败** --> **从Service移除** : 标记为未就绪
+    **就绪性探针成功** --> **加入Service** : 标记为就绪
+    
+    **启动探针成功** --> **存活性探针检查** : 并行开始
+    **存活性探针检查** --> **存活性探针成功** : 探针成功
+    **存活性探针检查** --> **存活性探针失败** : 探针失败
+    **存活性探针失败** --> **容器重启** : 超过失败阈值
+    **存活性探针成功** --> **存活性探针检查** : 继续监控
+    
+    **加入Service** --> **就绪性探针检查** : 继续监控
+    **从Service移除** --> **就绪性探针检查** : 继续监控
+```
+
+### 8. 探针配置最佳实践
+
+#### 8.1 启动探针配置
+```yaml
+# 适合慢启动应用
+startupProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30    # 启动延迟
+  periodSeconds: 10         # 检查间隔
+  timeoutSeconds: 1         # 超时时间
+  failureThreshold: 30      # 允许失败次数（总启动时间：30*10=300秒）
+  successThreshold: 1       # 成功阈值（必须为1）
+```
+
+#### 8.2 存活性探针配置
+```yaml
+# 检测应用死锁
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+    httpHeaders:
+    - name: Custom-Header
+      value: health-check
+  initialDelaySeconds: 30   # 等待启动探针完成
+  periodSeconds: 30        # 较长间隔避免频繁重启
+  timeoutSeconds: 5        # 超时时间
+  failureThreshold: 3      # 失败阈值
+  successThreshold: 1      # 成功阈值（必须为1）
+```
+
+#### 8.3 就绪性探针配置
+```yaml
+# 检测服务可用性
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 5    # 较短延迟快速响应
+  periodSeconds: 5         # 频繁检查快速恢复
+  timeoutSeconds: 3        # 超时时间
+  failureThreshold: 3      # 失败阈值
+  successThreshold: 1      # 成功阈值
+```
 
 ---
 
