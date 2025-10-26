@@ -331,7 +331,7 @@ graph TB
         SIMPLE["SimpleSecretManager<br/>• 直接 API 调用<br/>• 无缓存机制<br/>• 简单可靠"]
     end
     
-    subgraph Caching_Manager["Caching Manager"] 
+    subgraph Caching_Manager["Caching Manager"]
         CACHING["CachingSecretManager<br/>• TTL 缓存机制<br/>• 按需获取<br/>• 内存优化"]
         OBJECT_STORE["ObjectStore<br/>• 对象缓存<br/>• TTL 管理<br/>• 过期清理"]
     end

@@ -71,10 +71,8 @@ type NetworkPolicyEgressRule struct {
 ```mermaid
 graph TB
     subgraph "**NetworkPolicy 架构全景**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**策略定义层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             NP_RESOURCE[**NetworkPolicy 资源**<br/>• Pod 选择器<br/>• Ingress 规则<br/>• Egress 规则<br/>• 策略类型]
             
@@ -82,7 +80,6 @@ graph TB
         end
         
         subgraph "**Kubernetes 控制平面**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             API_SERVER[**API Server**<br/>• NetworkPolicy API<br/>• 资源验证<br/>• etcd 存储<br/>• 变更通知]
             
@@ -90,7 +87,6 @@ graph TB
         end
         
         subgraph "**网络插件层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             CNI_PLUGINS[**CNI 插件**<br/>• **Calico**: iptables/BPF<br/>• **Cilium**: eBPF<br/>• **Weave**: 用户空间<br/>• **Flannel**: 不支持]
             
@@ -98,7 +94,6 @@ graph TB
         end
         
         subgraph "**数据平面**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             NETWORK_STACK[**网络栈**<br/>• iptables 规则<br/>• eBPF 程序<br/>• 内核网络过滤<br/>• 流量转发]
             
@@ -106,7 +101,6 @@ graph TB
         end
         
         subgraph "**流量流向**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             INGRESS_TRAFFIC[**入站流量**<br/>• 外部→Pod<br/>• Pod→Pod<br/>• Service→Pod<br/>• 规则匹配]
             
@@ -251,16 +245,13 @@ spec:
 ```mermaid
 graph TB
     subgraph "**NetworkPolicy 规则匹配逻辑**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**Pod 选择器匹配**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             POD_SELECTOR[**podSelector**<br/>• **空选择器**: 匹配所有 Pod<br/>• **标签匹配**: 精确匹配<br/>• **命名空间范围**: 仅当前命名空间<br/>• **组合条件**: AND 逻辑]
         end
         
         subgraph "**Ingress 规则匹配**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             INGRESS_RULES[**入站规则处理**<br/>• **无规则**: 拒绝所有入站<br/>• **空 from**: 允许所有来源<br/>• **多个 from**: OR 逻辑<br/>• **端口+来源**: AND 逻辑]
             
@@ -268,7 +259,6 @@ graph TB
         end
         
         subgraph "**Egress 规则匹配**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             EGRESS_RULES[**出站规则处理**<br/>• **无规则**: 拒绝所有出站<br/>• **空 to**: 允许所有目标<br/>• **多个 to**: OR 逻辑<br/>• **端口+目标**: AND 逻辑]
             
@@ -276,13 +266,11 @@ graph TB
         end
         
         subgraph "**端口规则匹配**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             PORT_RULES[**端口匹配规则**<br/>• **协议**: TCP/UDP/SCTP<br/>• **端口号**: 具体端口<br/>• **端口名**: 命名端口<br/>• **端口范围**: port-endPort]
         end
         
-        subgtml:graph "**默认行为**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
+        subgraph DefaultBehavior ["**默认行为**"]
             
             DEFAULT_BEHAVIOR[**默认策略行为**<br/>• **无 NetworkPolicy**: 允许所有流量<br/>• **有 NetworkPolicy**: 默认拒绝<br/>• **多策略叠加**: 规则累加生效<br/>• **策略冲突**: 宽松优先]
         end
@@ -367,34 +355,28 @@ flowchart TD
 ```mermaid
 graph TB
     subgraph "**NetworkPolicy 策略组合效果**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**单一策略效果**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             SINGLE_POLICY[**单个 NetworkPolicy**<br/>• **仅 Ingress**: 限制入站，出站开放<br/>• **仅 Egress**: 限制出站，入站开放<br/>• **双向限制**: 同时限制入站出站<br/>• **空规则**: 完全隔离]
         end
         
         subgraph "**多策略叠加**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             MULTIPLE_POLICIES[**多个 NetworkPolicy**<br/>• **规则合并**: 取所有策略的并集<br/>• **累加生效**: 更宽松的访问<br/>• **命名空间隔离**: 每个命名空间独立<br/>• **优先级**: 无优先级概念]
         end
         
         subgraph "**策略冲突处理**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             CONFLICT_RESOLUTION[**冲突解决策略**<br/>• **允许优先**: 有允许规则就放行<br/>• **宽松合并**: 取最宽松的规则<br/>• **独立评估**: 每个策略独立评估<br/>• **OR 逻辑**: 任一策略匹配即可]
         end
         
         subgraph "**特殊情况处理**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             SPECIAL_CASES[**特殊场景**<br/>• **空 podSelector**: 匹配所有 Pod<br/>• **空规则列表**: 拒绝所有流量<br/>• **空 from/to**: 允许所有来源/目标<br/>• **本地节点流量**: 总是允许]
         end
         
         subgraph "**实际效果示例**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             EXAMPLE_EFFECTS[**组合效果示例**<br/>**策略A**: 允许端口80<br/>**策略B**: 允许端口443<br/>**实际效果**: 允许80和443<br/>**结果**: 规则累加生效]
         end
@@ -420,10 +402,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**CNI 插件 NetworkPolicy 支持对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**Calico**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CALICO[**Calico 实现**<br/>• **技术栈**: iptables/eBPF<br/>• **性能**: 高性能<br/>• **功能**: 完整支持<br/>• **扩展**: 支持 GlobalNetworkPolicy]
             
@@ -431,7 +411,6 @@ graph TB
         end
         
         subgraph "**Cilium**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             CILIUM[**Cilium 实现**<br/>• **技术栈**: eBPF<br/>• **性能**: 超高性能<br/>• **功能**: 完整支持+扩展<br/>• **特色**: L7 策略支持]
             
@@ -439,7 +418,6 @@ graph TB
         end
         
         subgraph "**Weave Net**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             WEAVE[**Weave 实现**<br/>• **技术栈**: 用户空间代理<br/>• **性能**: 中等性能<br/>• **功能**: 基础支持<br/>• **特色**: 易于部署]
             
@@ -447,13 +425,11 @@ graph TB
         end
         
         subgraph "**不支持插件**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             UNSUPPORTED[**不支持的插件**<br/>• **Flannel**: 基础覆盖网络<br/>• **host-local**: 本地网络<br/>• **bridge**: 简单桥接<br/>• **macvlan**: MAC 地址虚拟化]
         end
         
         subgraph "**实现对比**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             COMPARISON[**技术对比**<br/>**iptables**: 成熟稳定，规则数量限制<br/>**eBPF**: 高性能，复杂度高<br/>**用户空间**: 功能灵活，性能较低<br/>**内核集成**: 效率最高，开发复杂]
         end
@@ -582,40 +558,33 @@ spec:
 ```mermaid
 graph TB
     subgraph "**NetworkPolicy 最佳实践指南**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**设计原则**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             DESIGN_PRINCIPLES[**策略设计原则**<br/>• **最小权限原则**: 只开放必需的访问<br/>• **分层防护**: 多层安全策略<br/>• **明确拒绝**: 显式拒绝不需要的流量<br/>• **渐进实施**: 逐步收紧策略]
         end
         
         subgraph "**标签策略**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             LABEL_STRATEGY[**标签使用策略**<br/>• **一致性命名**: 统一标签规范<br/>• **层级标签**: tier, app, version<br/>• **环境标签**: prod, staging, dev<br/>• **功能标签**: frontend, api, database]
         end
         
         subgraph "**测试验证**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             TESTING[**策略测试方法**<br/>• **连通性测试**: 验证允许的连接<br/>• **隔离测试**: 验证拒绝的连接<br/>• **端口测试**: 验证端口级访问<br/>• **回归测试**: 确保策略变更安全]
         end
         
         subgraph "**监控告警**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             MONITORING[**监控和告警**<br/>• **策略违规**: 监控被拒绝的连接<br/>• **异常流量**: 检测异常网络行为<br/>• **策略覆盖**: 确保策略完整覆盖<br/>• **性能影响**: 监控策略对性能的影响]
         end
         
         subgraph "**运维管理**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             OPERATIONS[**运维实践**<br/>• **版本控制**: 策略配置版本管理<br/>• **变更管理**: 策略变更流程<br/>• **文档维护**: 策略文档同步更新<br/>• **应急预案**: 策略故障处理流程]
         end
         
         subgraph "**性能优化**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             PERFORMANCE[**性能优化建议**<br/>• **规则简化**: 避免过于复杂的规则<br/>• **选择器优化**: 高效的标签选择器<br/>• **策略合并**: 合并相似的策略<br/>• **插件选择**: 选择高性能CNI插件]
         end

@@ -44,15 +44,12 @@ DaemonSet 是 Kubernetes 中确保在集群的每个（或选定的）节点上�
 ```mermaid
 graph TB
     subgraph "**DaemonSet 核心架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**控制平面**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             API[**API Server**<br/>• DaemonSet 资源管理<br/>• 节点状态协调<br/>• Pod 生命周期管理]
             
             subgraph "**Controller Manager**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 DS_CTRL[**DaemonSet Controller**<br/>• 节点匹配逻辑<br/>• Pod 创建/删除<br/>• 滚动更新协调]
                 
@@ -63,31 +60,26 @@ graph TB
         end
         
         subgraph "**数据平面**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             subgraph "**Node-1**"
-                style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
                 
                 KUBELET1[**Kubelet**<br/>• Pod 运行管理<br/>• 容器生命周期<br/>• 资源监控]
                 POD1[**DaemonSet Pod**<br/>• 日志采集<br/>• 系统监控<br/>• 网络代理]
             end
             
             subgraph "**Node-2**"
-                style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
                 
                 KUBELET2[**Kubelet**<br/>• Pod 运行管理<br/>• 容器生命周期<br/>• 资源监控]
                 POD2[**DaemonSet Pod**<br/>• 日志采集<br/>• 系统监控<br/>• 网络代理]
             end
             
             subgraph "**Node-3**"
-                style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
                 
                 KUBELET3[**Kubelet**<br/>• Pod 运行管理<br/>• 容器生命周期<br/>• 资源监控]
                 POD3[**DaemonSet Pod**<br/>• 日志采集<br/>• 系统监控<br/>• 网络代理]
             end
             
             subgraph "**Master Node (Tainted)**"
-                style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
                 
                 MASTER_KUBELET[**Kubelet**<br/>• 主节点服务<br/>• 控制组件<br/>• 污点: NoSchedule]
                 NO_POD[**无 DaemonSet Pod**<br/>• 不匹配容忍性<br/>• 被污点排除<br/>• 仅系统组件]
@@ -125,10 +117,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**DaemonSet 系统层次架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**管理层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             USER[**管理员/用户**<br/>• DaemonSet 部署<br/>• 配置管理<br/>• 监控运维]
             
@@ -136,12 +126,10 @@ graph TB
         end
         
         subgraph "**控制层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             DAEMON_CONTROLLER[**DaemonSet Controller**<br/>• 期望状态管理<br/>• 节点 Pod 映射<br/>• 滚动更新协调]
             
             subgraph "**核心组件**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 NODE_MATCHER[**节点匹配器**<br/>• 节点选择器<br/>• 亲和性规则<br/>• 容忍性检查]
                 
@@ -152,7 +140,6 @@ graph TB
         end
         
         subgraph "**调度层**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             SCHEDULER[**调度器**<br/>• 节点分配<br/>• 资源匹配<br/>• 约束验证]
             
@@ -160,7 +147,6 @@ graph TB
         end
         
         subgraph "**执行层**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             CLUSTER_NODES[**集群节点**<br/>• Kubelet 代理<br/>• 容器运行时<br/>• 系统资源]
             
@@ -298,11 +284,8 @@ stateDiagram-v2
     **等待下次同步** --> [*] : 稍后重试
     **清理期望** --> [*] : 清理完成
     
-    note right of **节点匹配** : **匹配规则:**<br/>**• 节点选择器**<br/>**• 亲和性规则**<br/>**• 污点容忍性**<br/>**• 节点状态**
     
-    note right of **创建Pod** : **创建条件:**<br/>**• 节点符合条件**<br/>**• 节点无现有Pod**<br/>**• 集群资源充足**
     
-    note right of **删除Pod** : **删除条件:**<br/>**• 节点不符合条件**<br/>**• Pod 需要更新**<br/>**• 节点已删除**
 ```
 
 ---
@@ -432,10 +415,8 @@ flowchart TD
 ```mermaid
 graph TB
     subgraph "**集群节点与 Pod 分布**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**符合条件的节点**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             NODE1[**Worker Node-1**<br/>• 标签: type=worker<br/>• 无污点<br/>• 状态: Ready<br/>**✅ 运行 DaemonSet Pod**]
             
@@ -445,7 +426,6 @@ graph TB
         end
         
         subgraph "**不符合条件的节点**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             MASTER[**Master Node**<br/>• 标签: node-role=master<br/>• 污点: NoSchedule<br/>• 状态: Ready<br/>**❌ 无 DaemonSet Pod**]
             
@@ -453,7 +433,6 @@ graph TB
         end
         
         subgraph "**特殊状态节点**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             NOT_READY[**故障节点**<br/>• 标签: type=worker<br/>• 污点: node.kubernetes.io/not-ready<br/>• 状态: NotReady<br/>**🔄 Pod 保持运行**]
             
@@ -461,7 +440,6 @@ graph TB
         end
         
         subgraph "**DaemonSet 配置**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             DS_CONFIG[**DaemonSet 规格**<br/>• nodeSelector: type=worker<br/>• tolerations: 容忍故障<br/>• hostNetwork: true<br/>• 更新策略: RollingUpdate]
         end
@@ -607,11 +585,8 @@ stateDiagram-v2
     
     **已删除** --> [*]
     
-    note right of **运行中** : **Pod 状态检查:**<br/>**• 容器健康状态**<br/>**• 资源使用情况**<br/>**• 网络连通性**
     
-    note right of **就绪** : **服务就绪条件:**<br/>**• 所有容器运行**<br/>**• 健康检查通过**<br/>**• 就绪探针成功**
     
-    note right of **失败** : **失败处理策略:**<br/>**• 自动重建 Pod**<br/>**• 指数退避重试**<br/>**• 事件日志记录**
 ```
 
 ---
@@ -748,21 +723,17 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph "**DaemonSet 更新策略对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**RollingUpdate 策略**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             RU_TITLE[**滚动更新**<br/>**（默认策略）**]
             
             subgraph "**控制参数**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 RU_PARAMS[**MaxUnavailable: 1**<br/>**MaxSurge: 0**<br/>• 一次最多1个节点不可用<br/>• 不允许超额 Pod<br/>• 确保服务连续性]
             end
             
             subgraph "**更新过程**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
                 RU_PROCESS[**有序更新**<br/>1. 删除旧版本Pod<br/>2. 等待Pod终止<br/>3. 创建新版本Pod<br/>4. 等待Pod就绪<br/>5. 继续下一节点]
             end
@@ -771,18 +742,15 @@ graph TB
         end
         
         subgraph "**OnDelete 策略**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             OD_TITLE[**删除时更新**<br/>**（手动控制）**]
             
             subgraph "**触发条件**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 OD_TRIGGER[**手动触发**<br/>• 管理员手动删除Pod<br/>• Pod 失败时重建<br/>• 节点维护时清理]
             end
             
             subgraph "**更新过程**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
                 OD_PROCESS[**按需更新**<br/>1. Pod 被删除（手动）<br/>2. 控制器检测到删除<br/>3. 创建新版本Pod<br/>4. 新Pod使用最新配置<br/>5. 其他Pod保持不变]
             end
@@ -791,7 +759,6 @@ graph TB
         end
         
         subgraph "**策略选择建议**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             CHOICE_GUIDE[**选择指南**<br/>**生产环境**: RollingUpdate<br/>**测试环境**: OnDelete<br/>**关键服务**: RollingUpdate + 小批量<br/>**维护窗口**: OnDelete]
         end
@@ -855,10 +822,8 @@ tolerations := []v1.Toleration{
 ```mermaid
 graph TB
     subgraph "**DaemonSet 容错与自愈机制**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**节点故障处理**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             NODE_FAILURE[**节点故障检测**<br/>• 节点状态: NotReady<br/>• 网络不可达<br/>• Kubelet 停止响应]
             
@@ -868,7 +833,6 @@ graph TB
         end
         
         subgraph "**Pod 故障处理**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             POD_FAILURE[**Pod 故障检测**<br/>• 容器崩溃<br/>• 健康检查失败<br/>• 资源限制触发]
             
@@ -878,7 +842,6 @@ graph TB
         end
         
         subgraph "**资源压力处理**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             RESOURCE_PRESSURE[**资源压力检测**<br/>• 磁盘空间不足<br/>• 内存压力<br/>• PID 资源耗尽]
             
@@ -888,7 +851,6 @@ graph TB
         end
         
         subgraph "**网络故障处理**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             NET_FAILURE[**网络故障**<br/>• CNI 插件失败<br/>• 网络接口故障<br/>• DNS 解析失败]
             
@@ -1024,10 +986,8 @@ spec:
 ```mermaid
 graph TB
     subgraph "**DaemonSet 使用场景决策矩阵**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**节点级服务**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             NODE_SERVICES[**每节点一个实例需求**<br/>• 系统监控<br/>• 日志收集<br/>• 网络代理<br/>• 安全代理]
             
@@ -1035,7 +995,6 @@ graph TB
         end
         
         subgraph "**全集群覆盖**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             CLUSTER_WIDE[**集群范围部署**<br/>• 所有工作节点<br/>• 选择性节点<br/>• 基础设施组件<br/>• 平台服务]
             
@@ -1043,7 +1002,6 @@ graph TB
         end
         
         subgraph "**高可用要求**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             FAULT_TOLERANCE[**容错需求**<br/>• 节点故障容忍<br/>• 网络分区处理<br/>• 资源压力运行<br/>• 服务连续性]
             
@@ -1051,7 +1009,6 @@ graph TB
         end
         
         subgraph "**反面场景**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             NOT_SUITABLE[**不适合 DaemonSet**<br/>• 应用级服务<br/>• 数据库实例<br/>• Web 应用<br/>• 需要负载均衡的服务]
             

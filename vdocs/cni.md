@@ -66,12 +66,64 @@ CNI_COMMAND=VERSION # 查询版本信息
 
 ## CNI 整体架构图
 
+### 3.1 Pod 维度网络架构图
+
+```mermaid
+graph TB
+    subgraph Node ["**Worker Node**"]
+        subgraph Pod1 ["**Pod 1**"]
+            Container1A[**Container A**<br/>eth0: 10.244.1.10<br/>Network Namespace: ns1]
+            Container1B[**Container B**<br/>共享网络命名空间]
+            PauseContainer1[**Pause Container**<br/>维持网络命名空间]
+        end
+        
+        subgraph Pod2 ["**Pod 2**"]
+            Container2A[**Container C**<br/>eth0: 10.244.1.11<br/>Network Namespace: ns2]
+            PauseContainer2[**Pause Container**<br/>维持网络命名空间]
+        end
+        
+        subgraph HostNetworkStack ["**Host Network Stack**"]
+            CNI0Bridge[**cni0 网桥**<br/>10.244.1.1]
+            VethPair1[**veth pair 1**<br/>vethxxx <--> eth0@Pod1]
+            VethPair2[**veth pair 2**<br/>vethyyy <--> eth0@Pod2]
+            HostRouting[**路由表**<br/>10.244.0.0/16 via cni0]
+            IPTablesRules[**iptables 规则**<br/>SNAT/DNAT/Masquerade]
+        end
+        
+        Kubelet[**Kubelet**<br/>Pod 生命周期管理]
+        ContainerRuntime[**Container Runtime**<br/>containerd/CRI-O]
+        CNIManager[**CNI Manager**<br/>网络配置协调]
+        
+        CNIPlugins["**CNI Plugins**<br/>/opt/cni/bin/"]
+        CNIConfig["**CNI Config**<br/>/etc/cni/net.d/"]
+    end
+    
+    PauseContainer1 --> VethPair1
+    PauseContainer2 --> VethPair2
+    VethPair1 --> CNI0Bridge
+    VethPair2 --> CNI0Bridge
+    CNI0Bridge --> HostRouting
+    HostRouting --> IPTablesRules
+    
+    Kubelet --> ContainerRuntime
+    ContainerRuntime --> CNIManager
+    CNIManager --> CNIPlugins
+    CNIPlugins --> CNIConfig
+    CNIPlugins --> VethPair1
+    CNIPlugins --> VethPair2
+    
+    Container1A -.共享网络.- PauseContainer1
+    Container1B -.共享网络.- PauseContainer1
+    Container2A -.共享网络.- PauseContainer2
+```
+
 上方的架构图展示了 CNI 在 Kubernetes 集群中的完整架构，包括：
 
 1. **控制平面组件**：API Server、Controller Manager 等
 2. **节点组件**：Kubelet、Container Runtime、CNI Manager
 3. **网络组件**：CNI 插件、Linux Bridge、iptables 等
 4. **Pod 网络**：每个 Pod 的网络配置和 IP 分配
+5. **Pod 内部**：Pause Container、共享网络命名空间、veth pair 连接
 
 ---
 
@@ -315,7 +367,158 @@ CNI 插件分类图展示了完整的插件生态：
 
 ## CNI 工作流程详解
 
-### 1. Pod 网络创建流程
+### 1. CNI 功能完整时序图
+
+```mermaid
+sequenceDiagram
+    participant User as **用户**
+    participant APIServer as **API Server**
+    participant Scheduler as **Scheduler**
+    participant Kubelet as **Kubelet**
+    participant Runtime as **Container Runtime**
+    participant CNI as **CNI Plugin**
+    participant IPAM as **IPAM Plugin**
+    participant Network as **Network Stack**
+    
+    User->>APIServer: **1. 创建 Pod**
+    APIServer->>Scheduler: **2. 调度 Pod**
+    Scheduler->>APIServer: **3. 绑定 Pod 到 Node**
+    APIServer->>Kubelet: **4. Pod 创建通知**
+    
+    Kubelet->>Runtime: **5. 创建 Pause Container**
+    Runtime->>Runtime: **6. 创建 Network Namespace**
+    
+    Runtime->>CNI: **7. CNI ADD 命令**
+    Note right of CNI: **ENV: CNI_COMMAND=ADD**<br/>**ENV: CNI_NETNS=/var/run/netns/xxx**
+    
+    CNI->>IPAM: **8. 请求 IP 地址**
+    IPAM->>IPAM: **9. 分配 IP (10.244.1.10)**
+    IPAM->>CNI: **10. 返回 IP 信息**
+    
+    CNI->>Network: **11. 创建 veth pair**
+    CNI->>Network: **12. 配置 veth 一端到 Pod**
+    CNI->>Network: **13. 配置 veth 另一端到 Bridge**
+    CNI->>Network: **14. 配置 Pod IP 地址**
+    CNI->>Network: **15. 配置默认路由**
+    CNI->>Network: **16. 配置 iptables 规则**
+    
+    CNI->>Runtime: **17. 返回网络配置结果**
+    Runtime->>Kubelet: **18. Pause Container 就绪**
+    
+    Kubelet->>Runtime: **19. 创建业务容器**
+    Runtime->>Runtime: **20. 加入 Pause 网络命名空间**
+    Runtime->>Kubelet: **21. Pod 就绪**
+    Kubelet->>APIServer: **22. 更新 Pod 状态**
+```
+
+### 2. CNI 与 Pod 交互时序图
+
+```mermaid
+sequenceDiagram
+    participant Pod as **Pod**
+    participant PauseContainer as **Pause Container**
+    participant Veth as **veth pair**
+    participant Bridge as **cni0 Bridge**
+    participant Host as **Host Network**
+    participant External as **External Network**
+    
+    Note over Pod,External: **场景 1: Pod 内容器间通信**
+    Pod->>PauseContainer: **1. 数据包（lo 回环）**
+    PauseContainer->>Pod: **2. 直接返回（同一网络命名空间）**
+    
+    Note over Pod,External: **场景 2: Pod 到同节点 Pod**
+    Pod->>Veth: **3. 数据包（目标：10.244.1.11）**
+    Veth->>Bridge: **4. 转发到网桥**
+    Bridge->>Bridge: **5. 查找 MAC 地址表**
+    Bridge->>Veth: **6. 转发到目标 veth**
+    Veth->>Pod: **7. 送达目标 Pod**
+    
+    Note over Pod,External: **场景 3: Pod 到跨节点 Pod**
+    Pod->>Veth: **8. 数据包（目标：10.244.2.10）**
+    Veth->>Bridge: **9. 转发到网桥**
+    Bridge->>Host: **10. 查路由表（10.244.2.0/24 via tunnel）**
+    Host->>External: **11. 封装并发送（VXLAN/IPIP）**
+    External->>Host: **12. 到达目标节点**
+    Host->>Bridge: **13. 解封装并转发**
+    Bridge->>Veth: **14. 转发到目标 veth**
+    Veth->>Pod: **15. 送达目标 Pod**
+    
+    Note over Pod,External: **场景 4: Pod 到 Service**
+    Pod->>Veth: **16. 数据包（目标：ClusterIP）**
+    Veth->>Bridge: **17. 转发到网桥**
+    Bridge->>Host: **18. iptables DNAT规则匹配**
+    Host->>Host: **19. 目标IP改写为 Pod IP**
+    Host->>Bridge: **20. 重新路由**
+    Bridge->>Veth: **21. 转发到后端 Pod**
+    
+    Note over Pod,External: **场景 5: Pod 访问外网**
+    Pod->>Veth: **22. 数据包（目标：8.8.8.8）**
+    Veth->>Bridge: **23. 转发到网桥**
+    Bridge->>Host: **24. iptables SNAT/Masquerade**
+    Host->>External: **25. 源IP改写为节点IP**
+    External->>Host: **26. 返回数据包**
+    Host->>Bridge: **27. SNAT反向转换**
+    Bridge->>Veth: **28. 还原目标IP**
+    Veth->>Pod: **29. 送达 Pod**
+```
+
+### 3. 日常网络流转图
+
+```mermaid
+graph LR
+    subgraph PodA ["**Pod A (10.244.1.10)**"]
+        ContainerA[**业务容器**]
+        PauseA[**Pause**]
+    end
+    
+    subgraph PodB ["**Pod B (10.244.1.11)**"]
+        ContainerB[**业务容器**]
+        PauseB[**Pause**]
+    end
+    
+    subgraph PodC ["**Pod C (10.244.2.10)**<br/>另一节点"]
+        ContainerC[**业务容器**]
+        PauseC[**Pause**]
+    end
+    
+    subgraph HostNet ["**Host Network**"]
+        Veth1[**veth1**]
+        Veth2[**veth2**]
+        Bridge[**cni0<br/>10.244.1.1**]
+        Route[**路由表**]
+        IPTables[**iptables**]
+        Eth0[**eth0<br/>节点网卡**]
+    end
+    
+    Service[**Service<br/>10.96.0.1**]
+    Internet[**Internet**]
+    
+    ContainerA -->|共享网络| PauseA
+    ContainerB -->|共享网络| PauseB
+    ContainerC -->|共享网络| PauseC
+    
+    PauseA -->|veth pair| Veth1
+    PauseB -->|veth pair| Veth2
+    
+    Veth1 --> Bridge
+    Veth2 --> Bridge
+    
+    Bridge -->|同节点流量| Veth2
+    Bridge -->|跨节点流量| Route
+    Bridge -->|Service流量| IPTables
+    Bridge -->|外网流量| IPTables
+    
+    Route --> Eth0
+    IPTables --> Route
+    IPTables -->|DNAT| Veth2
+    IPTables -->|SNAT| Eth0
+    
+    Eth0 -.隧道/路由.-> PodC
+    Eth0 -.负载均衡.-> Service
+    Eth0 --> Internet
+```
+
+### 4. Pod 网络创建流程
 
 网络创建序列图展示了完整的创建过程：
 
@@ -436,7 +639,245 @@ EOF
 
 ## 主流 CNI 插件深度分析
 
-### 1. Calico CNI
+### 1. 常用 CNI 插件工作原理图
+
+#### 1.1 Flannel VXLAN 模式工作原理
+
+```mermaid
+graph TB
+    subgraph Node1 ["**Node 1 (192.168.1.10)**"]
+        Pod1[**Pod A**<br/>10.244.1.10]
+        Veth1[**veth pair**]
+        Bridge1[**cni0**<br/>10.244.1.1]
+        Flannel1[**flanneld**<br/>管理 VXLAN]
+        VTEP1[**flannel.1**<br/>VTEP 设备<br/>MAC: aa:bb:cc:dd:ee:01]
+        Eth1[**eth0**<br/>192.168.1.10]
+    end
+    
+    subgraph Node2 ["**Node 2 (192.168.1.20)**"]
+        Pod2[**Pod B**<br/>10.244.2.10]
+        Veth2[**veth pair**]
+        Bridge2[**cni0**<br/>10.244.2.1]
+        Flannel2[**flanneld**<br/>管理 VXLAN]
+        VTEP2[**flannel.1**<br/>VTEP 设备<br/>MAC: aa:bb:cc:dd:ee:02]
+        Eth2[**eth0**<br/>192.168.1.20]
+    end
+    
+    Etcd[**etcd**<br/>存储网络配置]
+    
+    Pod1 -->|1. 数据包| Veth1
+    Veth1 --> Bridge1
+    Bridge1 -->|2. 路由查找| VTEP1
+    VTEP1 -->|3. VXLAN 封装<br/>Outer IP: 192.168.1.10->192.168.1.20<br/>Inner IP: 10.244.1.10->10.244.2.10| Eth1
+    
+    Eth1 -.4. UDP 8472 隧道.-> Eth2
+    
+    Eth2 -->|5. VXLAN 解封装| VTEP2
+    VTEP2 --> Bridge2
+    Bridge2 --> Veth2
+    Veth2 -->|6. 送达| Pod2
+    
+    Flannel1 -.监听配置.-> Etcd
+    Flannel2 -.监听配置.-> Etcd
+```
+
+#### 1.2 Calico BGP 模式工作原理
+
+```mermaid
+graph TB
+    subgraph Node1 ["**Node 1**"]
+        Pod1A[**Pod A**<br/>10.244.1.10/32]
+        Pod1B[**Pod B**<br/>10.244.1.11/32]
+        CalicoNode1[**calico-node**<br/>Felix + BIRD BGP]
+        Route1[**路由表**<br/>10.244.1.10/32 dev cali-xxx<br/>10.244.2.10/32 via 192.168.1.20]
+        IPTables1[**iptables**<br/>Network Policy 规则]
+        Cali1A[**cali-xxx**<br/>veth to Pod A]
+        Cali1B[**cali-yyy**<br/>veth to Pod B]
+    end
+    
+    subgraph Node2 ["**Node 2**"]
+        Pod2[**Pod C**<br/>10.244.2.10/32]
+        CalicoNode2[**calico-node**<br/>Felix + BIRD BGP]
+        Route2[**路由表**<br/>10.244.2.10/32 dev cali-zzz<br/>10.244.1.0/26 via 192.168.1.10]
+        IPTables2[**iptables**<br/>Network Policy 规则]
+        Cali2[**cali-zzz**<br/>veth to Pod C]
+    end
+    
+    ToRSwitch[**ToR Switch**<br/>BGP Router]
+    
+    Pod1A --> Cali1A
+    Pod1B --> Cali1B
+    Cali1A --> Route1
+    Cali1B --> Route1
+    Route1 --> IPTables1
+    
+    Pod2 --> Cali2
+    Cali2 --> Route2
+    Route2 --> IPTables2
+    
+    CalicoNode1 -.BGP Peer.-> CalicoNode2
+    CalicoNode1 -.BGP路由通告.-> ToRSwitch
+    CalicoNode2 -.BGP路由通告.-> ToRSwitch
+```
+
+#### 1.3 Cilium eBPF 模式工作原理
+
+```mermaid
+graph TB
+    subgraph Node ["**Node**"]
+        subgraph Kernel ["**Linux Kernel**"]
+            eBPF[**eBPF 程序**<br/>• XDP 程序（网卡层）<br/>• TC 程序（流量控制）<br/>• Socket 程序（套接字层）]
+            BPFMaps[**BPF Maps**<br/>• Endpoints 映射<br/>• Services 映射<br/>• Policy 映射<br/>• Connection 跟踪]
+        end
+        
+        Pod1[**Pod A**<br/>10.244.1.10]
+        Pod2[**Pod B**<br/>10.244.1.11]
+        
+        Veth1[**veth pair**]
+        Veth2[**veth pair**]
+        
+        CiliumAgent[**cilium-agent**<br/>• 加载 eBPF 程序<br/>• 更新 BPF Maps<br/>• Network Policy 编译]
+        
+        Eth0[**eth0**]
+    end
+    
+    APIServer[**API Server**]
+    
+    Pod1 --> Veth1
+    Pod2 --> Veth2
+    
+    Veth1 -.TC eBPF 处理.-> eBPF
+    Veth2 -.TC eBPF 处理.-> eBPF
+    
+    eBPF --> BPFMaps
+    eBPF --> Eth0
+    
+    Eth0 -.XDP eBPF 处理.-> eBPF
+    
+    CiliumAgent -.加载/更新.-> eBPF
+    CiliumAgent -.更新.-> BPFMaps
+    CiliumAgent -.监听资源.-> APIServer
+    
+    Note1[**eBPF 优势**<br/>• 无需 iptables<br/>• 内核级性能<br/>• 动态加载<br/>• 细粒度可见性]
+```
+
+#### 1.4 Weave Net 工作原理
+
+```mermaid
+graph TB
+    subgraph Node1 ["**Node 1**"]
+        Pod1[**Pod**<br/>10.32.0.5]
+        VethW1[**veth**]
+        Weave1[**weave bridge**]
+        WeaveRouter1[**weave router**<br/>• 网格路由<br/>• 加密隧道<br/>• DNS 服务]
+    end
+    
+    subgraph Node2 ["**Node 2**"]
+        Pod2[**Pod**<br/>10.32.0.20]
+        VethW2[**veth**]
+        Weave2[**weave bridge**]
+        WeaveRouter2[**weave router**<br/>• 网格路由<br/>• 加密隧道<br/>• DNS 服务]
+    end
+    
+    Pod1 --> VethW1
+    VethW1 --> Weave1
+    Weave1 --> WeaveRouter1
+    
+    Pod2 --> VethW2
+    VethW2 --> Weave2
+    Weave2 --> WeaveRouter2
+    
+    WeaveRouter1 -.TCP 6783（控制）<br/>UDP 6783（数据）<br/>可选 IPsec 加密.-> WeaveRouter2
+```
+
+### 2. host-local IPAM 管理功能架构图
+
+```mermaid
+graph TB
+    subgraph HostLocal ["**host-local IPAM Plugin**"]
+        ConfigParser[**配置解析器**<br/>读取 IPAM 配置]
+        IPAllocator[**IP 分配器**<br/>分配可用 IP]
+        StorageBackend[**存储后端**<br/>/var/lib/cni/networks/]
+        LockManager[**文件锁管理**<br/>防止并发冲突]
+    end
+    
+    subgraph FileSystem ["**文件系统**"]
+        NetworkDir[**/var/lib/cni/networks/podnet/**]
+        IPFile1[**10.244.1.10**<br/>存储 Container ID]
+        IPFile2[**10.244.1.11**<br/>存储 Container ID]
+        IPFile3[**10.244.1.12**<br/>存储 Container ID]
+        LastReserved[**last_reserved_ip.0**<br/>记录最后分配的 IP]
+    end
+    
+    CNIPlugin[**CNI Main Plugin**<br/>bridge/macvlan]
+    
+    CNIPlugin -->|1. 请求 IP| ConfigParser
+    ConfigParser -->|2. 解析配置<br/>subnet: 10.244.1.0/24<br/>rangeStart: 10.244.1.10<br/>rangeEnd: 10.244.1.254| IPAllocator
+    
+    IPAllocator -->|3. 获取锁| LockManager
+    LockManager -->|4. 加锁成功| StorageBackend
+    
+    StorageBackend -->|5. 检查已分配| NetworkDir
+    NetworkDir --> IPFile1
+    NetworkDir --> IPFile2
+    NetworkDir --> IPFile3
+    NetworkDir --> LastReserved
+    
+    StorageBackend -->|6. 找到可用 IP<br/>10.244.1.13| IPAllocator
+    IPAllocator -->|7. 创建 IP 文件| NetworkDir
+    IPAllocator -->|8. 更新 last_reserved| LastReserved
+    
+    IPAllocator -->|9. 释放锁| LockManager
+    IPAllocator -->|10. 返回 IP 信息| CNIPlugin
+```
+
+### 3. host-local IPAM 分配时序图
+
+```mermaid
+sequenceDiagram
+    participant CNI as **CNI Plugin**
+    participant IPAM as **host-local IPAM**
+    participant Lock as **File Lock**
+    participant FS as **File System**
+    
+    Note over CNI,FS: **IP 分配流程（ADD）**
+    
+    CNI->>IPAM: **1. 调用 IPAM cmdAdd**<br/>subnet: 10.244.1.0/24<br/>containerID: abc123
+    
+    IPAM->>IPAM: **2. 解析配置**<br/>rangeStart: 10.244.1.10<br/>rangeEnd: 10.244.1.254<br/>gateway: 10.244.1.1
+    
+    IPAM->>Lock: **3. 获取网络锁**<br/>/var/run/cni/lock/podnet.lock
+    Lock->>IPAM: **4. 加锁成功**
+    
+    IPAM->>FS: **5. 读取 last_reserved_ip.0**
+    FS->>IPAM: **6. 返回上次分配: 10.244.1.12**
+    
+    IPAM->>IPAM: **7. 计算候选 IP: 10.244.1.13**
+    
+    IPAM->>FS: **8. 检查 IP 文件是否存在**<br/>/var/lib/cni/networks/podnet/10.244.1.13
+    FS->>IPAM: **9. 文件不存在（可用）**
+    
+    IPAM->>FS: **10. 创建 IP 文件**<br/>内容: abc123
+    IPAM->>FS: **11. 更新 last_reserved_ip.0**<br/>写入: 10.244.1.13
+    
+    IPAM->>Lock: **12. 释放锁**
+    
+    IPAM->>CNI: **13. 返回分配结果**<br/>IP: 10.244.1.13/24<br/>Gateway: 10.244.1.1
+    
+    Note over CNI,FS: **IP 释放流程（DEL）**
+    
+    CNI->>IPAM: **14. 调用 IPAM cmdDel**<br/>IP: 10.244.1.13<br/>containerID: abc123
+    
+    IPAM->>Lock: **15. 获取网络锁**
+    Lock->>IPAM: **16. 加锁成功**
+    
+    IPAM->>FS: **17. 删除 IP 文件**<br/>/var/lib/cni/networks/podnet/10.244.1.13
+    
+    IPAM->>Lock: **18. 释放锁**
+    IPAM->>CNI: **19. 返回成功**
+```
+
+### 4. Calico CNI
 
 **架构特点**：
 - BGP 路由协议

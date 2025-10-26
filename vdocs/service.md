@@ -44,15 +44,12 @@ Service 是 Kubernetes 中为一组 Pod 提供网络访问抽象的核心资源�
 ```mermaid
 graph TB
     subgraph "**Service 核心架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**控制平面**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             API[**API Server**<br/>• Service 资源管理<br/>• 端点协调<br/>• 规则分发]
             
             subgraph "**Controller Manager**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 EP_CTRL[**Endpoints Controller**<br/>• Pod 发现<br/>• 端点管理<br/>• 状态同步]
                 
@@ -63,15 +60,12 @@ graph TB
         end
         
         subgraph "**数据平面**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             subgraph "**每个节点**"
-                style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
                 
                 KUBE_PROXY[**kube-proxy**<br/>• 规则监听<br/>• 流量代理<br/>• 负载均衡]
                 
                 subgraph "**代理实现**"
-                    style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
                     
                     IPTABLES[**iptables 模式**<br/>• 规则生成<br/>• 内核转发<br/>• 高性能]
                     
@@ -82,7 +76,6 @@ graph TB
             end
             
             subgraph "**服务网格**"
-                style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
                 
                 CLIENT[**客户端 Pod**<br/>• 服务调用<br/>• DNS 解析<br/>• 连接建立]
                 
@@ -115,15 +108,149 @@ graph TB
 
 ## Service 整体架构
 
-### 1. 系统层次架构图
+### 1. Service 容器与控制器交互架构图
+
+```mermaid
+graph TB
+    subgraph ControlPlane ["**Control Plane**"]
+        subgraph APIServerPod ["**API Server Pod**"]
+            APIContainer[**kube-apiserver**<br/>容器<br/>REST API<br/>资源验证]
+        end
+        
+        subgraph ControllerPod ["**Controller Manager Pod**"]
+            EndpointsController[**endpoints-controller**<br/>容器线程<br/>监听 Service/Pod<br/>管理 Endpoints]
+            EndpointSliceController[**endpointslice-controller**<br/>容器线程<br/>监听 Service/Pod<br/>管理 EndpointSlice]
+        end
+        
+        subgraph ETCDPod ["**etcd Pod**"]
+            ETCDContainer[**etcd**<br/>容器<br/>存储 Service<br/>存储 Endpoints]
+        end
+    end
+    
+    subgraph WorkerNode ["**Worker Node**"]
+        subgraph ProxyPod ["**kube-proxy Pod - DaemonSet**"]
+            ProxyContainer[**kube-proxy**<br/>容器<br/>iptables/IPVS 管理<br/>服务规则同步]
+        end
+        
+        subgraph AppPod1 ["**Application Pod**"]
+            AppContainer1[**app-container**<br/>应用容器<br/>调用 Service]
+            AppContainer2[**sidecar**<br/>辅助容器<br/>流量拦截]
+        end
+        
+        subgraph BackendPod ["**Backend Pod**"]
+            BackendContainer[**backend-container**<br/>后端容器<br/>处理请求]
+        end
+        
+        Kubelet[**kubelet**<br/>节点代理<br/>Pod 生命周期]
+    end
+    
+    AppContainer1 -->|创建 Service| APIContainer
+    APIContainer -->|通知| EndpointsController
+    APIContainer -->|通知| EndpointSliceController
+    
+    EndpointsController -->|watch Pod| APIContainer
+    EndpointsController -->|更新 Endpoints| APIContainer
+    EndpointSliceController -->|watch Pod| APIContainer
+    EndpointSliceController -->|更新 EndpointSlice| APIContainer
+    
+    APIContainer -->|持久化| ETCDContainer
+    
+    ProxyContainer -->|watch Service/Endpoints| APIContainer
+    ProxyContainer -->|配置 iptables/IPVS| WorkerNode
+    
+    AppContainer1 -.DNS 查询<br/>Service ClusterIP.-> ProxyContainer
+    ProxyContainer -.负载均衡.-> BackendContainer
+    
+    Kubelet -->|管理| ProxyPod
+    Kubelet -->|管理| AppPod1
+    Kubelet -->|管理| BackendPod
+```
+
+### 2. Service 功能完整时序交互图
+
+```mermaid
+sequenceDiagram
+    participant User as **用户**
+    participant kubectl as **kubectl**
+    participant APIServer as **API Server**
+    participant EndpointsCtrl as **Endpoints Controller**
+    participant EndpointSliceCtrl as **EndpointSlice Controller**
+    participant KubeProxy as **kube-proxy**
+    participant IPTables as **iptables/IPVS**
+    participant Client as **Client Pod**
+    participant Backend as **Backend Pod**
+    
+    Note over User,Backend: **阶段 1: 创建 Service**
+    
+    User->>kubectl: **1. kubectl create service**
+    kubectl->>APIServer: **2. POST /api/v1/services**
+    APIServer->>APIServer: **3. 验证和准入控制**
+    APIServer->>APIServer: **4. 分配 ClusterIP**
+    APIServer->>APIServer: **5. 写入 etcd**
+    
+    APIServer->>EndpointsCtrl: **6. Service 创建事件**
+    EndpointsCtrl->>APIServer: **7. 查询匹配 Pod（selector）**
+    APIServer->>EndpointsCtrl: **8. 返回 Pod 列表**
+    EndpointsCtrl->>APIServer: **9. 创建/更新 Endpoints 对象**
+    
+    APIServer->>EndpointSliceCtrl: **10. Service 创建事件**
+    EndpointSliceCtrl->>APIServer: **11. 查询匹配 Pod**
+    APIServer->>EndpointSliceCtrl: **12. 返回 Pod 列表**
+    EndpointSliceCtrl->>APIServer: **13. 创建 EndpointSlice 对象**
+    
+    Note over User,Backend: **阶段 2: kube-proxy 同步规则**
+    
+    APIServer->>KubeProxy: **14. Watch Service 事件**
+    APIServer->>KubeProxy: **15. Watch Endpoints/EndpointSlice 事件**
+    
+    KubeProxy->>KubeProxy: **16. 计算规则变更**
+    KubeProxy->>IPTables: **17. 生成 iptables 规则**
+    
+    Note right of IPTables: **规则示例：**<br/>**-A KUBE-SERVICES -d 10.96.0.1/32 -p tcp -m tcp --dport 80 -j KUBE-SVC-XXX**<br/>**-A KUBE-SVC-XXX -m statistic --mode random --probability 0.33 -j KUBE-SEP-AAA**<br/>**-A KUBE-SEP-AAA -p tcp -m tcp -j DNAT --to-destination 10.244.1.10:8080**
+    
+    IPTables->>KubeProxy: **18. 规则应用成功**
+    
+    Note over User,Backend: **阶段 3: 服务调用**
+    
+    Client->>Client: **19. DNS 解析 Service（my-svc.default.svc.cluster.local）**
+    Client->>Client: **20. 获取 ClusterIP: 10.96.0.1**
+    
+    Client->>IPTables: **21. 连接 10.96.0.1:80**
+    IPTables->>IPTables: **22. 匹配 KUBE-SERVICES 链**
+    IPTables->>IPTables: **23. 负载均衡选择后端（random）**
+    IPTables->>IPTables: **24. DNAT 改写目标 IP:Port**
+    
+    IPTables->>Backend: **25. 转发到 10.244.1.10:8080**
+    Backend->>Backend: **26. 处理请求**
+    Backend->>IPTables: **27. 返回响应**
+    
+    IPTables->>IPTables: **28. 反向 NAT（SNAT）**
+    IPTables->>Client: **29. 返回响应（源 IP: 10.96.0.1）**
+    
+    Note over User,Backend: **阶段 4: Pod 变更处理**
+    
+    User->>kubectl: **30. kubectl scale deployment --replicas=5**
+    kubectl->>APIServer: **31. 更新 Deployment**
+    APIServer->>APIServer: **32. 创建新 Pod**
+    
+    APIServer->>EndpointsCtrl: **33. Pod 创建事件**
+    EndpointsCtrl->>EndpointsCtrl: **34. 检查 Pod 是否 Ready**
+    EndpointsCtrl->>APIServer: **35. 更新 Endpoints（添加新 IP）**
+    
+    APIServer->>KubeProxy: **36. Endpoints 更新事件**
+    KubeProxy->>IPTables: **37. 增量更新 iptables 规则**
+    IPTables->>KubeProxy: **38. 规则更新完成**
+    
+    Note over Client,Backend: **新后端 Pod 立即可用**
+```
+
+### 3. 系统层次架构图
 
 ```mermaid
 graph TB
     subgraph "**Service 系统层次架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**应用层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CLIENT_APP[**客户端应用**<br/>• 服务调用<br/>• DNS 查询<br/>• HTTP/TCP 连接]
             
@@ -131,7 +258,6 @@ graph TB
         end
         
         subgraph "**服务发现层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             DNS[**DNS 服务**<br/>• CoreDNS<br/>• 服务名解析<br/>• A/AAAA/SRV 记录]
             
@@ -139,7 +265,6 @@ graph TB
         end
         
         subgraph "**控制层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             SERVICE_CONTROLLER[**Service 控制器**<br/>• 生命周期管理<br/>• IP 分配<br/>• 状态协调]
             
@@ -149,7 +274,6 @@ graph TB
         end
         
         subgraph "**网络层**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             KUBE_PROXY[**kube-proxy**<br/>• 流量代理<br/>• 负载均衡<br/>• 规则管理]
             
@@ -157,7 +281,6 @@ graph TB
         end
         
         subgraph "**基础设施层**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             POD_NETWORK[**Pod 网络**<br/>• CNI 插件<br/>• IP 分配<br/>• 路由管理]
             
@@ -212,21 +335,17 @@ const (
 ```mermaid
 graph TB
     subgraph "**Service 类型对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**ClusterIP 类型**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CLUSTER_IP_TITLE[**ClusterIP Service**<br/>**（默认类型）**]
             
             subgraph "**访问特性**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 CLUSTER_ACCESS[**集群内部访问**<br/>• ClusterIP: 10.96.0.1<br/>• 端口: 80<br/>• 协议: TCP/UDP<br/>• 负载均衡: 轮询]
             end
             
             subgraph "**实现机制**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
                 CLUSTER_IMPL[**虚拟 IP 实现**<br/>• iptables/IPVS 规则<br/>• 内核空间转发<br/>• DNS A 记录<br/>• kube-proxy 代理]
             end
@@ -235,18 +354,15 @@ graph TB
         end
         
         subgraph "**NodePort 类型**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             NODE_PORT_TITLE[**NodePort Service**<br/>**（节点端口访问）**]
             
             subgraph "**访问特性**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 NODE_ACCESS[**节点端口访问**<br/>• NodePort: 30080<br/>• ClusterIP: 10.96.0.2<br/>• 所有节点开放<br/>• 外部可访问]
             end
             
             subgraph "**实现机制**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
                 NODE_IMPL[**端口映射实现**<br/>• 节点端口绑定<br/>• DNAT 转换<br/>• 跨节点转发<br/>• 源 IP 保持]
             end
@@ -255,18 +371,15 @@ graph TB
         end
         
         subgraph "**LoadBalancer 类型**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             LB_TITLE[**LoadBalancer Service**<br/>**（负载均衡器访问）**]
             
             subgraph "**访问特性**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 LB_ACCESS[**负载均衡器访问**<br/>• External IP: 203.0.113.1<br/>• NodePort: 30080<br/>• ClusterIP: 10.96.0.3<br/>• 高可用入口]
             end
             
             subgraph "**实现机制**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
                 LB_IMPL[**云服务集成**<br/>• Cloud Controller<br/>• 外部 LB 创建<br/>• 健康检查<br/>• 流量分发]
             end
@@ -275,18 +388,15 @@ graph TB
         end
         
         subgraph "**ExternalName 类型**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             EXT_NAME_TITLE[**ExternalName Service**<br/>**（DNS 别名映射）**]
             
             subgraph "**访问特性**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 EXT_ACCESS[**DNS 别名访问**<br/>• ExternalName: db.example.com<br/>• CNAME 记录<br/>• 无端点<br/>• DNS 解析]
             end
             
             subgraph "**实现机制**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
                 EXT_IMPL[**DNS 重定向**<br/>• CoreDNS 配置<br/>• CNAME 解析<br/>• 无代理<br/>• 纯 DNS 服务]
             end
@@ -370,18 +480,18 @@ sequenceDiagram
 
 ```go
 func (e *Controller) syncService(ctx context.Context, key string) error {
-    namespace, name, err := cache.SplitMetaNamespaceKey(key)
+    namespace, name, err := cache.SplitMetaNamespaceKey- key
     if err != nil {
         return err
     }
 
-    service, err := e.serviceLister.Services(namespace).Get(name)
+    service, err := e.serviceLister.Services- namespace.Get- name
     if err != nil {
-        if !errors.IsNotFound(err) {
+        if !errors.IsNotFound- err {
             return err
         }
         // Service 已删除，删除对应的端点
-        err = e.client.CoreV1().Endpoints(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+        err = e.client.CoreV1- .Endpoints- namespace.Delete(ctx, name, metav1.DeleteOptions{})
         return err
     }
 
@@ -396,7 +506,7 @@ func (e *Controller) syncService(ctx context.Context, key string) error {
     }
 
     // 获取匹配标签选择器的 Pod
-    pods, err := e.podLister.Pods(service.Namespace).List(labels.Set(service.Spec.Selector).AsSelectorPreValidated())
+    pods, err := e.podLister.Pods(service.Namespace).List(labels.Set(service.Spec.Selector).AsSelectorPreValidated- )
     if err != nil {
         return err
     }
@@ -412,14 +522,14 @@ func (e *Controller) syncService(ctx context.Context, key string) error {
 
 ```go
 func (c *Controller) syncService(logger klog.Logger, key string) error {
-    namespace, name, err := cache.SplitMetaNamespaceKey(key)
+    namespace, name, err := cache.SplitMetaNamespaceKey- key
     if err != nil {
         return err
     }
 
-    service, err := c.serviceLister.Services(namespace).Get(name)
+    service, err := c.serviceLister.Services- namespace.Get- name
     if err != nil {
-        if !apierrors.IsNotFound(err) {
+        if !apierrors.IsNotFound- err {
             return err
         }
         // 清理相关资源
@@ -433,8 +543,8 @@ func (c *Controller) syncService(logger klog.Logger, key string) error {
     }
 
     // 获取 Pod 和现有 EndpointSlice
-    pods, err := c.podLister.Pods(service.Namespace).List(labels.Set(service.Spec.Selector).AsSelectorPreValidated())
-    endpointSlices, err := c.endpointSliceLister.EndpointSlices(service.Namespace).List(esLabelSelector)
+    pods, err := c.podLister.Pods(service.Namespace).List(labels.Set(service.Spec.Selector).AsSelectorPreValidated- )
+    endpointSlices, err := c.endpointSliceLister.EndpointSlices(service.Namespace).List- esLabelSelector
 
     // 协调 EndpointSlice
     return c.reconciler.Reconcile(service, pods, endpointSlices, triggerTime)
@@ -446,10 +556,8 @@ func (c *Controller) syncService(logger klog.Logger, key string) error {
 ```mermaid
 graph TB
     subgraph "**端点发现与管理架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**服务定义层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             SERVICE_SPEC[**Service 规格**<br/>• 标签选择器: app=web<br/>• 端口映射: 80→8080<br/>• 会话亲和性配置<br/>• 流量策略设置]
             
@@ -457,7 +565,6 @@ graph TB
         end
         
         subgraph "**发现控制层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             EP_CONTROLLER[**Endpoints Controller**<br/>• 监听 Service 变化<br/>• 监听 Pod 变化<br/>• 计算端点列表<br/>• 更新 Endpoints 对象]
             
@@ -465,7 +572,6 @@ graph TB
         end
         
         subgraph "**端点存储层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             ENDPOINTS[**Endpoints 对象**<br/>• 传统端点格式<br/>• 单一对象存储<br/>• 全量更新模式<br/>• 规模限制较大]
             
@@ -473,7 +579,6 @@ graph TB
         end
         
         subgraph "**消费者层**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             KUBE_PROXY[**kube-proxy**<br/>• 监听端点变化<br/>• 更新转发规则<br/>• 负载均衡配置<br/>• 健康检查集成]
             
@@ -483,7 +588,6 @@ graph TB
         end
         
         subgraph "**状态反馈层**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             POD_STATUS[**Pod 状态**<br/>• 就绪状态检查<br/>• 健康探针结果<br/>• 网络可达性<br/>• 端口监听状态]
             
@@ -540,12 +644,6 @@ stateDiagram-v2
     
     **端点删除** --> [*]
     **忽略Pod** --> [*]
-    
-    note right of **就绪检查** : **检查条件:**<br/>**• Readiness Probe**<br/>**• Pod Phase = Running**<br/>**• 容器端口监听**<br/>**• 网络可达性**
-    
-    note right of **流量转发** : **转发状态:**<br/>**• iptables 规则生效**<br/>**• IPVS 后端配置**<br/>**• DNS 记录更新**<br/>**• 负载均衡激活**
-    
-    note right of **端点更新** : **更新触发:**<br/>**• Pod IP 变更**<br/>**• 端口配置变更**<br/>**• 标签更新**<br/>**• 节点信息变更**
 ```
 
 ---
@@ -602,29 +700,24 @@ type ServicePort struct {
 ```mermaid
 graph TB
     subgraph "**Service 负载均衡机制**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**流量入口**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CLIENT_REQUEST[**客户端请求**<br/>• 源 IP: 10.1.1.100<br/>• 目标: my-service:80<br/>• 协议: HTTP<br/>• 连接数: 100]
         end
         
         subgraph "**Service 虚拟层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             SERVICE_VIP[**Service VIP**<br/>• ClusterIP: 10.96.0.100<br/>• 端口: 80<br/>• 会话亲和性: ClientIP<br/>• 超时: 3小时]
             
-            LB_ALGORITHMS[**负载均衡算法**<br/>• **轮询 (Round Robin)**<br/>• **随机 (Random)**<br/>• **源IP哈希 (Source Hash)**<br/>• **最少连接 (Least Connection)**]
+            LB_ALGORITHMS[**负载均衡算法**<br/>• **轮询 - Round Robin**<br/>• **随机 - Random**<br/>• **源IP哈希 - Source Hash**<br/>• **最少连接 - Least Connection**]
         end
         
         subgraph "**后端 Pod 集群**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             POD_POOL[**Pod 池**<br/>• **就绪 Pod**: 3个<br/>• **未就绪 Pod**: 1个<br/>• **健康检查**: 通过<br/>• **容量**: 50 req/s 每个]
             
             subgraph "**具体 Pod 实例**"
-                style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
                 
                 POD1[**Pod-1**<br/>• IP: 10.1.1.10<br/>• 端口: 8080<br/>• 状态: Ready<br/>• 负载: 30%]
                 
@@ -637,7 +730,6 @@ graph TB
         end
         
         subgraph "**流量分发策略**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             TRAFFIC_POLICY[**流量策略**<br/>• **Internal**: Cluster<br/>• **External**: Local<br/>• **会话保持**: 启用<br/>• **健康检查**: 启用]
             
@@ -690,32 +782,32 @@ const (
 
 ```go
 // iptables 规则生成
-func (proxier *Proxier) syncProxyRules() {
+func (proxier *Proxier) syncProxyRules-  {
     // 创建服务链规则
     natRules.Write(
-        "-A", string(kubeServicesChain),
+        "-A", string- kubeServicesChain,
         "-m", "comment", "--comment", fmt.Sprintf(`"%s cluster IP"`, svcPortNameString),
         "-m", protocol, "-p", protocol,
-        "-d", svcInfo.ClusterIP().String(),
-        "--dport", strconv.Itoa(svcInfo.Port()),
-        "-j", string(internalTrafficChain))
+        "-d", svcInfo.ClusterIP- .String- ,
+        "--dport", strconv.Itoa(svcInfo.Port- ),
+        "-j", string- internalTrafficChain)
 
     // 为每个端点创建规则
     for i, endpointChain := range endpointChains {
         // 负载均衡规则
         natRules.Write(
-            "-A", string(svcChain),
+            "-A", string- svcChain,
             "-m", "comment", "--comment", endpoints[i],
             "-m", "statistic", "--mode", "random", "--probability", probability,
-            "-j", string(endpointChain))
+            "-j", string- endpointChain)
             
         // DNAT 规则
         natRules.Write(
-            "-A", string(endpointChain),
+            "-A", string- endpointChain,
             "-s", endpoints[i],
-            "-j", string(kubeMarkMasqChain))
+            "-j", string- kubeMarkMasqChain)
         natRules.Write(
-            "-A", string(endpointChain),
+            "-A", string- endpointChain,
             "-p", protocol,
             "-j", "DNAT", "--to-destination", endpoints[i])
     }
@@ -779,23 +871,19 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph "**kube-proxy 实现模式对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**iptables 模式**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             IPTABLES_TITLE[**iptables 实现**<br/>**（默认模式）**]
             
             subgraph "**实现原理**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 IPTABLES_IMPL[**规则链实现**<br/>• KUBE-SERVICES 主链<br/>• KUBE-SVC-XXX 服务链<br/>• KUBE-SEP-XXX 端点链<br/>• 概率负载均衡]
             end
             
             subgraph "**性能特性**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
-                IPTABLES_PERF[**性能特点**<br/>• 小规模性能好<br/>• 规则数量线性增长<br/>• O(n) 查找复杂度<br/>• 全量规则更新]
+                IPTABLES_PERF[**性能特点**<br/>• 小规模性能好<br/>• 规则数量线性增长<br/>• O- n 查找复杂度<br/>• 全量规则更新]
             end
             
             IPTABLES_PROS[**优势**<br/>• 内核原生支持<br/>• 兼容性好<br/>• 调试工具丰富<br/>• 社区成熟]
@@ -804,20 +892,17 @@ graph TB
         end
         
         subgraph "**IPVS 模式**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             IPVS_TITLE[**IPVS 实现**<br/>**（高性能模式）**]
             
             subgraph "**实现原理**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
-                IPVS_IMPL[**虚拟服务器实现**<br/>• 虚拟服务器 (VIP)<br/>• 真实服务器 (RIP)<br/>• 调度算法配置<br/>• 连接跟踪]
+                IPVS_IMPL[**虚拟服务器实现**<br/>• 虚拟服务器 - VIP<br/>• 真实服务器 - RIP<br/>• 调度算法配置<br/>• 连接跟踪]
             end
             
             subgraph "**性能特性**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
-                IPVS_PERF[**性能特点**<br/>• 大规模性能好<br/>• O(1) 查找复杂度<br/>• 增量规则更新<br/>• 硬件加速支持]
+                IPVS_PERF[**性能特点**<br/>• 大规模性能好<br/>• O- 1 查找复杂度<br/>• 增量规则更新<br/>• 硬件加速支持]
             end
             
             IPVS_PROS[**优势**<br/>• 高性能<br/>• 多种调度算法<br/>• 连接保持<br/>• 扩展性好]
@@ -826,7 +911,6 @@ graph TB
         end
         
         subgraph "**调度算法对比**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             ALGORITHMS[**IPVS 调度算法**<br/>• **rr**: 轮询<br/>• **wrr**: 加权轮询<br/>• **lc**: 最少连接<br/>• **wlc**: 加权最少连接<br/>• **lblc**: 基于本地最少连接<br/>• **sh**: 源地址哈希<br/>• **dh**: 目标地址哈希<br/>• **sed**: 最短期望延迟<br/>• **nq**: 不排队调度]
             
@@ -834,7 +918,6 @@ graph TB
         end
         
         subgraph "**适用场景**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             SCENARIO[**场景选择**<br/>**小规模集群**: iptables<br/>**大规模集群**: IPVS<br/>**高性能要求**: IPVS<br/>**简单部署**: iptables<br/>**负载均衡算法**: IPVS<br/>**调试需求**: iptables]
         end
@@ -895,16 +978,13 @@ type ClientIPConfig struct {
 ```mermaid
 graph TB
     subgraph "**Service 会话亲和性机制**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**配置层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
-            AFFINITY_CONFIG[**亲和性配置**<br/>• **类型**: ClientIP<br/>• **超时**: 10800秒 (3小时)<br/>• **范围**: 0-86400秒<br/>• **默认**: None]
+            AFFINITY_CONFIG[**亲和性配置**<br/>• **类型**: ClientIP<br/>• **超时**: 10800秒 - 3小时<br/>• **范围**: 0-86400秒<br/>• **默认**: None]
         end
         
         subgraph "**实现层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             IPTABLES_AFFINITY[**iptables 实现**<br/>• recent 模块<br/>• 源IP记录<br/>• 超时管理<br/>• 哈希表存储]
             
@@ -912,7 +992,6 @@ graph TB
         end
         
         subgraph "**会话状态管理**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             SESSION_TABLE[**会话表**<br/>• **客户端IP**: 192.168.1.100<br/>• **目标Pod**: 10.1.1.10:8080<br/>• **创建时间**: 2023-12-01 10:00<br/>• **最后访问**: 2023-12-01 12:30<br/>• **超时时间**: 2023-12-01 13:00]
             
@@ -920,7 +999,6 @@ graph TB
         end
         
         subgraph "**流量处理**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             NEW_SESSION[**新会话**<br/>1. 检查会话表<br/>2. 未找到记录<br/>3. 负载均衡选择<br/>4. 创建会话记录<br/>5. 转发请求]
             

@@ -176,16 +176,13 @@ const (
 ```mermaid
 graph TB
     subgraph "**Kubernetes 集群架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**控制平面**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             API[**API Server**<br/>• Job API 验证<br/>• 事件记录<br/>• 状态存储]
             ETCD[**etcd**<br/>• Job 状态持久化<br/>• Pod 状态追踪<br/>• 配置存储]
             
             subgraph "**Controller Manager**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 JOB_CTRL[**Job Controller**<br/>• Pod 生命周期管理<br/>• 并发控制<br/>• 失败重试机制]
                 
@@ -196,14 +193,12 @@ graph TB
         end
         
         subgraph "**工作节点**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             KUBELET[**Kubelet**<br/>• Pod 创建执行<br/>• 容器状态监控<br/>• 资源管理]
             
             CRI[**Container Runtime**<br/>• 容器生命周期<br/>• 镜像管理<br/>• 网络配置]
             
             subgraph "**Job Pods**"
-                style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
                 
                 POD1[**Worker Pod 1**<br/>• 批处理任务<br/>• 索引: 0<br/>• 状态: Running]
                 POD2[**Worker Pod 2**<br/>• 批处理任务<br/>• 索引: 1<br/>• 状态: Completed]
@@ -212,7 +207,6 @@ graph TB
         end
         
         subgraph "**存储和配置**"
-            style subgraph fill:#f0f0f0,stroke:#666,stroke-width:2px
             
             CONFIGMAP[**ConfigMap**<br/>• 应用配置<br/>• 环境变量<br/>• 配置文件]
             
@@ -244,10 +238,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**Job Controller 内部架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**事件监听层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             JOB_INFORMER[**Job Informer**<br/>• 监听Job变化<br/>• 缓存Job状态<br/>• 事件分发]
             
@@ -255,7 +247,6 @@ graph TB
         end
         
         subgraph "**工作队列层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             MAIN_QUEUE[**主工作队列**<br/>• Job同步任务<br/>• 限流重试<br/>• 错误处理]
             
@@ -263,7 +254,6 @@ graph TB
         end
         
         subgraph "**期望状态管理**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             EXPECTATIONS[**Controller Expectations**<br/>• Pod创建期望<br/>• Pod删除期望<br/>• 状态同步]
             
@@ -271,7 +261,6 @@ graph TB
         end
         
         subgraph "**控制逻辑层**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             SYNC_LOGIC[**同步逻辑**<br/>• Job状态计算<br/>• Pod数量调节<br/>• 完成检查]
             
@@ -281,7 +270,6 @@ graph TB
         end
         
         subgraph "**状态更新层**"
-            style subgraph fill:#f0f0f0,stroke:#666,stroke-width:2px
             
             STATUS_UPDATER[**状态更新器**<br/>• Job状态同步<br/>• 条件更新<br/>• 指标上报]
         end
@@ -306,10 +294,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**Job 执行模式架构对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**Non-Indexed Job**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             NI_JOB[**Non-Indexed Job**<br/>• completions: 6<br/>• parallelism: 3<br/>• 同质化Pod]
             
@@ -321,7 +307,6 @@ graph TB
         end
         
         subgraph "**Indexed Job**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             I_JOB[**Indexed Job**<br/>• completions: 6<br/>• parallelism: 3<br/>• completionMode: Indexed]
             
@@ -333,7 +318,6 @@ graph TB
         end
         
         subgraph "**Work Queue Job**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             WQ_JOB[**Work Queue Job**<br/>• 无completions限制<br/>• parallelism: 4<br/>• 动态任务分配]
             
@@ -546,11 +530,8 @@ stateDiagram-v2
     
     **清理完成** --> [*]
     
-    note right of **运行中** : **Pod状态追踪:**<br/>**• Active: 运行中Pod数**<br/>**• Succeeded: 成功Pod数**<br/>**• Failed: 失败Pod数**
     
-    note right of **成功完成** : **完成条件:**<br/>**• succeeded >= completions**<br/>**• 所有Pod正常退出**
     
-    note right of **失败** : **失败条件:**<br/>**• failed > backoffLimit**<br/>**• Pod失败策略触发**
 ```
 
 ### 5. Job 同步处理源码分析
@@ -608,17 +589,14 @@ func (jm *Controller) syncJob(ctx context.Context, key string) (forget bool, rEr
 ```mermaid
 graph TB
     subgraph "**Job 控制循环核心模块**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**输入模块**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             JOB_LISTER[**Job Lister**<br/>• 获取Job对象<br/>• 缓存查询<br/>• 版本检查]
             POD_LISTER[**Pod Lister**<br/>• 获取Pod列表<br/>• 标签选择器<br/>• 状态过滤]
         end
         
         subgraph "**状态计算模块**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             STATUS_CALC[**状态计算器**<br/>• Active Pod计数<br/>• Succeeded Pod计数<br/>• Failed Pod计数]
             
@@ -628,7 +606,6 @@ graph TB
         end
         
         subgraph "**决策模块**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             POD_MANAGER[**Pod管理决策**<br/>• 创建Pod数量<br/>• 删除Pod选择<br/>• 替换策略]
             
@@ -638,7 +615,6 @@ graph TB
         end
         
         subgraph "**执行模块**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             POD_CREATOR[**Pod创建器**<br/>• Pod规格生成<br/>• 标签设置<br/>• 环境变量注入]
             

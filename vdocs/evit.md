@@ -107,13 +107,13 @@ type Manager interface {
     Start(diskInfoProvider DiskInfoProvider, podFunc ActivePodsFunc, podCleanedUpFunc PodCleanedUpFunc, monitoringInterval time.Duration)
 
     // IsUnderMemoryPressure 如果节点处于内存压力下返回true
-    IsUnderMemoryPressure() bool
+    IsUnderMemoryPressure-  bool
 
     // IsUnderDiskPressure 如果节点处于磁盘压力下返回true
-    IsUnderDiskPressure() bool
+    IsUnderDiskPressure-  bool
 
     // IsUnderPIDPressure 如果节点处于PID压力下返回true
-    IsUnderPIDPressure() bool
+    IsUnderPIDPressure-  bool
 }
 ```
 
@@ -129,7 +129,7 @@ var (
     signalToResource map[evictionapi.Signal]v1.ResourceName
 )
 
-func init() {
+func init-  {
     // 映射驱逐信号到节点条件
     signalToNodeCondition = map[evictionapi.Signal]v1.NodeConditionType{}
     signalToNodeCondition[evictionapi.SignalMemoryAvailable] = v1.NodeMemoryPressure
@@ -155,6 +155,187 @@ func init() {
 ---
 
 ## Pod Eviction 整体架构图
+
+### 3.1 系统架构全景图
+
+```mermaid
+graph TB
+    subgraph Node ["**Worker Node**"]
+        subgraph Kubelet ["**Kubelet**"]
+            EvictionManager[**Eviction Manager**<br/>驱逐决策核心]
+            PodManager[**Pod Manager**<br/>Pod 生命周期管理]
+            ResourceMonitor[**Resource Monitor**<br/>资源使用监控]
+            StatsProvider[**Stats Provider**<br/>统计数据提供]
+            SignalObserver[**Signal Observer**<br/>信号观察器]
+        end
+        
+        subgraph ResourceLayers ["**资源层**"]
+            Memory[**内存 - Memory**<br/>memory.available]
+            Disk[**磁盘 - Disk**<br/>nodefs.available<br/>imagefs.available]
+            Inodes[**Inodes**<br/>nodefs.inodesFree<br/>imagefs.inodesFree]
+            PIDs[**PID**<br/>pid.available]
+        end
+        
+        subgraph Pods ["**Pod 集合**"]
+            SystemPod[**System Pod**<br/>kube-system<br/>优先级最高]
+            GuaranteedPod[**Guaranteed Pod**<br/>requests=limits<br/>优先级高]
+            BurstablePod[**Burstable Pod**<br/>有 requests<br/>优先级中]
+            BestEffortPod[**BestEffort Pod**<br/>无 requests/limits<br/>优先级最低]
+        end
+        
+        subgraph Cgroups ["**Cgroups**"]
+            MemoryCgroup[**memory cgroup**<br/>内存限制]
+            CPUCgroup[**cpu cgroup**<br/>CPU 配额]
+            PIDCgroup[**pids cgroup**<br/>进程数限制]
+        end
+    end
+    
+    subgraph APIServer ["**API Server**"]
+        PodAPI[**Pod API**<br/>Pod 状态更新]
+        EventAPI[**Event API**<br/>驱逐事件记录]
+    end
+    
+    ResourceMonitor --> Memory
+    ResourceMonitor --> Disk
+    ResourceMonitor --> Inodes
+    ResourceMonitor --> PIDs
+    
+    ResourceMonitor --> StatsProvider
+    StatsProvider --> SignalObserver
+    SignalObserver --> EvictionManager
+    
+    EvictionManager -.评估驱逐.-> SystemPod
+    EvictionManager -.评估驱逐.-> GuaranteedPod
+    EvictionManager -.评估驱逐.-> BurstablePod
+    EvictionManager -.评估驱逐.-> BestEffortPod
+    
+    EvictionManager --> PodManager
+    PodManager -.终止 Pod.-> BestEffortPod
+    PodManager -.终止 Pod.-> BurstablePod
+    
+    PodManager --> Cgroups
+    
+    EvictionManager --> PodAPI
+    EvictionManager --> EventAPI
+```
+
+### 3.2 模块交互架构图
+
+```mermaid
+graph TB
+    subgraph EvictionCore ["**驱逐核心模块**"]
+        Manager[**Eviction Manager**<br/>• synchronize 主循环<br/>• 阈值检测<br/>• 驱逐决策]
+        ThresholdManager[**Threshold Manager**<br/>• 阈值配置<br/>• 软/硬阈值<br/>• 宽限期管理]
+        SignalProcessor[**Signal Processor**<br/>• 信号采集<br/>• 数据聚合<br/>• 压力判断]
+    end
+    
+    subgraph ResourceModule ["**资源监控模块**"]
+        StatsProvider[**Stats Provider**<br/>• cAdvisor 集成<br/>• 资源使用统计<br/>• 实时数据采集]
+        SummaryAPI[**Summary API**<br/>• /stats/summary<br/>• Pod 级资源<br/>• 节点级资源]
+        MemcgNotifier[**memcg Notifier**<br/>• 内核 memcg 事件<br/>• 内存压力通知<br/>• 实时触发]
+    end
+    
+    subgraph SortModule ["**排序模块**"]
+        QoSRanker[**QoS Ranker**<br/>• BestEffort<br/>• Burstable<br/>• Guaranteed]
+        UsageRanker[**Usage Ranker**<br/>• 相对使用率<br/>• 超出 requests<br/>• 磁盘使用]
+        PriorityRanker[**Priority Ranker**<br/>• PriorityClass<br/>• 优先级数值<br/>• 系统 Pod]
+    end
+    
+    subgraph ActionModule ["**执行模块**"]
+        PodKiller[**Pod Killer**<br/>• 删除 Pod<br/>• 宽限期处理<br/>• 强制终止]
+        NodeReclaimer[**Node Reclaimer**<br/>• 镜像垃圾回收<br/>• 容器垃圾回收<br/>• 磁盘清理]
+        ConditionUpdater[**Condition Updater**<br/>• MemoryPressure<br/>• DiskPressure<br/>• PIDPressure]
+    end
+    
+    Manager --> ThresholdManager
+    Manager --> SignalProcessor
+    SignalProcessor --> StatsProvider
+    StatsProvider --> SummaryAPI
+    StatsProvider --> MemcgNotifier
+    
+    Manager --> QoSRanker
+    Manager --> UsageRanker
+    Manager --> PriorityRanker
+    
+    QoSRanker --> PodKiller
+    UsageRanker --> PodKiller
+    PriorityRanker --> PodKiller
+    
+    Manager --> NodeReclaimer
+    Manager --> ConditionUpdater
+```
+
+### 3.3 驱逐决策时序图
+
+```mermaid
+sequenceDiagram
+    participant Timer as **定时器**
+    participant EvictionMgr as **Eviction Manager**
+    participant StatsProvider as **Stats Provider**
+    participant ThresholdChecker as **Threshold Checker**
+    participant SignalObserver as **Signal Observer**
+    participant Ranker as **Pod Ranker**
+    participant PodManager as **Pod Manager**
+    participant API as **API Server**
+    
+    Note over Timer,API: **驱逐决策完整流程**
+    
+    Timer->>EvictionMgr: **1. 定时触发 - 10s**
+    EvictionMgr->>StatsProvider: **2. 获取资源统计**
+    StatsProvider->>StatsProvider: **3. 采集 cAdvisor 数据**
+    StatsProvider->>EvictionMgr: **4. 返回 Summary**
+    
+    EvictionMgr->>SignalObserver: **5. 观察信号**
+    SignalObserver->>SignalObserver: **6. 解析 memory.available<br/>nodefs.available<br/>imagefs.available<br/>pid.available**
+    SignalObserver->>EvictionMgr: **7. 返回信号值**
+    
+    EvictionMgr->>ThresholdChecker: **8. 检查阈值**
+    
+    alt 硬阈值触发
+        ThresholdChecker->>EvictionMgr: **9a. 立即驱逐**
+    else 软阈值触发
+        ThresholdChecker->>ThresholdChecker: **9b. 检查持续时间**
+        
+        alt 超过宽限期
+            ThresholdChecker->>EvictionMgr: **10b. 触发驱逐**
+        else 未超过宽限期
+            ThresholdChecker->>EvictionMgr: **10c. 继续观察**
+            EvictionMgr->>Timer: **11c. 等待下次检查**
+        end
+    else 未触发阈值
+        ThresholdChecker->>EvictionMgr: **9d. 无需驱逐**
+        EvictionMgr->>EvictionMgr: **10d. 清理压力状态**
+        EvictionMgr->>Timer: **11d. 等待下次检查**
+    end
+    
+    Note over EvictionMgr,API: **执行驱逐决策**
+    
+    EvictionMgr->>Ranker: **12. 获取驱逐候选列表**
+    Ranker->>Ranker: **13. QoS 排序**
+    Ranker->>Ranker: **14. 资源使用排序**
+    Ranker->>Ranker: **15. 优先级排序**
+    Ranker->>EvictionMgr: **16. 返回排序后的 Pod 列表**
+    
+    EvictionMgr->>EvictionMgr: **17. 选择驱逐 Pod**
+    
+    loop 直到资源释放足够
+        EvictionMgr->>PodManager: **18. 驱逐 Pod**
+        PodManager->>API: **19. 删除 Pod**
+        API->>PodManager: **20. 确认删除**
+        
+        EvictionMgr->>StatsProvider: **21. 重新检查资源**
+        StatsProvider->>EvictionMgr: **22. 返回最新状态**
+        
+        alt 资源充足
+            EvictionMgr->>EvictionMgr: **23a. 停止驱逐**
+        else 资源仍不足
+            EvictionMgr->>Ranker: **23b. 选择下一个 Pod**
+        end
+    end
+    
+    EvictionMgr->>API: **24. 更新节点条件**
+    EvictionMgr->>API: **25. 记录驱逐事件**
+```
 
 上方的架构图展示了 Pod 驱逐机制在 Kubernetes 集群中的完整架构，包括：
 
@@ -206,8 +387,8 @@ func NewManager(
 ```go
 // Admit 如果Pod对节点稳定性不安全则拒绝准入
 func (m *managerImpl) Admit(attrs *lifecycle.PodAdmitAttributes) lifecycle.PodAdmitResult {
-    m.RLock()
-    defer m.RUnlock()
+    m.RLock- 
+    defer m.RUnlock- 
     if len(m.nodeConditions) == 0 {
         return lifecycle.PodAdmitResult{Admit: true}
     }
@@ -246,32 +427,32 @@ func (m *managerImpl) Admit(attrs *lifecycle.PodAdmitAttributes) lifecycle.PodAd
 func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, activePodsFunc ActivePodsFunc) []*v1.Pod {
     // 如果未设置专用镜像文件系统，则查询
     if m.dedicatedImageFs == nil {
-        hasImageFs, ok := m.isImageFsDedicated(diskInfoProvider)
+        hasImageFs, ok := m.isImageFsDedicated- diskInfoProvider
         if ok != nil {
             return nil
         }
         m.dedicatedImageFs = &hasImageFs
     }
 
-    activePods := activePodsFunc()
+    activePods := activePodsFunc- 
     updateStats := true
-    summary, err := m.summaryProvider.Get(updateStats)
+    summary, err := m.summaryProvider.Get- updateStats
     if err != nil {
         klog.ErrorS(err, "Failed to get summary stats")
         return nil
     }
 
     if m.clock.Since(m.thresholdsLastUpdated) > notifierRefreshInterval {
-        m.thresholdsLastUpdated = m.clock.Now()
+        m.thresholdsLastUpdated = m.clock.Now- 
         for _, notifier := range m.thresholdNotifiers {
-            if err := notifier.UpdateThreshold(summary); err != nil {
-                klog.ErrorS(err, "Failed to update mem notify threshold", "notifier", notifier.Description())
+            if err := notifier.UpdateThreshold- summary; err != nil {
+                klog.ErrorS(err, "Failed to update mem notify threshold", "notifier", notifier.Description- )
             }
         }
     }
 
     // 进行观察并获取信号功能值
-    observations, statsFunc := makeSignalObservations(summary)
+    observations, statsFunc := makeSignalObservations- summary
     debugLogObservations("observations", observations)
 
     // 确定需要驱逐的阈值
@@ -279,7 +460,7 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, activePodsF
     debugLogThresholdsWithObservation("thresholds - ignoring grace period", thresholds, observations)
 
     // 跟踪已满足阈值的时间
-    now := m.clock.Now()
+    now := m.clock.Now- 
     thresholdsFirstObservedAt := thresholdsFirstObservedAt(thresholds, m.thresholdsFirstObservedAt, now)
 
     // 确定满足其宽限期的阈值
@@ -287,15 +468,15 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, activePodsF
     debugLogThresholdsWithObservation("thresholds - respecting grace period", thresholds, observations)
 
     // 跟踪正在进行的监测
-    m.Lock()
+    m.Lock- 
     m.lastObservations = observations
     m.thresholdsFirstObservedAt = thresholdsFirstObservedAt
     m.thresholdsMet = thresholds
     
     // 确定节点条件
-    nodeConditions := nodeConditions(thresholds)
-    if len(nodeConditions) > 0 {
-        klog.V(3).InfoS("eviction manager: node conditions - observed", "nodeCondition", nodeConditions)
+    nodeConditions := nodeConditions- thresholds
+    if len- nodeConditions > 0 {
+        klog.V- 3.InfoS("eviction manager: node conditions - observed", "nodeCondition", nodeConditions)
     }
 
     // 更新内部状态
@@ -303,12 +484,12 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, activePodsF
     m.nodeConditionsLastObservedAt = nodeConditionsLastObservedAt(nodeConditions, m.nodeConditionsLastObservedAt, now)
 
     // 驱逐Pod
-    if len(thresholds) > 0 {
+    if len- thresholds > 0 {
         evictionResults := m.evictPods(activePods, statsFunc, thresholds)
-        m.Unlock()
+        m.Unlock- 
         return evictionResults
     }
-    m.Unlock()
+    m.Unlock- 
     return nil
 }
 ```
@@ -336,7 +517,7 @@ func thresholdsMet(thresholds []evictionapi.Threshold, observations signalObserv
         threshold := thresholds[i]
         observed, found := observations[threshold.Signal]
         if !found {
-            klog.V(5).InfoS("Eviction manager: no observation found for eviction signal", "signal", threshold.Signal)
+            klog.V- 5.InfoS("Eviction manager: no observation found for eviction signal", "signal", threshold.Signal)
             continue
         }
         
@@ -344,7 +525,7 @@ func thresholdsMet(thresholds []evictionapi.Threshold, observations signalObserv
         thresholdMet := false
         quantity := evictionapi.GetThresholdQuantity(threshold.Value, observed.capacity)
         if threshold.Operator == evictionapi.OpLessThan {
-            thresholdMet = observed.available.Cmp(quantity) < 0
+            thresholdMet = observed.available.Cmp- quantity < 0
         }
         if thresholdMet {
             results = append(results, threshold)
@@ -359,16 +540,16 @@ func thresholdsMet(thresholds []evictionapi.Threshold, observations signalObserv
 ```go
 // evictPods 驱逐Pod以回收压力资源
 func (m *managerImpl) evictPods(activePods []*v1.Pod, statsFunc statsFunc, thresholds []evictionapi.Threshold) []*v1.Pod {
-    sort.Sort(byEvictionPriority(activePods))
+    sort.Sort(byEvictionPriority- activePods)
     
     // 按照阈值优先级排序
-    sort.Sort(byEvictionThresholdPriority(thresholds))
-    thresholdToReclaim, resourceToReclaim, foundAny := getReclaimableThreshold(thresholds)
+    sort.Sort(byEvictionThresholdPriority- thresholds)
+    thresholdToReclaim, resourceToReclaim, foundAny := getReclaimableThreshold- thresholds
     if !foundAny {
         return nil
     }
     
-    klog.V(3).InfoS("eviction manager: attempting to reclaim", "resourceName", resourceToReclaim)
+    klog.V- 3.InfoS("eviction manager: attempting to reclaim", "resourceName", resourceToReclaim)
     
     // 按驱逐优先级排序Pod
     rank, ok := m.signalToRankFunc[thresholdToReclaim.Signal]
@@ -380,7 +561,7 @@ func (m *managerImpl) evictPods(activePods []*v1.Pod, statsFunc statsFunc, thres
     // 对Pod进行排序
     rank(activePods, statsFunc)
     
-    klog.V(4).InfoS("eviction manager: pods ranked for eviction", "pods", format.Pods(activePods))
+    klog.V- 4.InfoS("eviction manager: pods ranked for eviction", "pods", format.Pods- activePods)
     
     // 记录我们正在回收的资源
     m.recorder.Eventf(m.nodeRef, v1.EventTypeWarning, "EvictionThresholdMet", "Attempting to reclaim %s", resourceToReclaim)
@@ -389,12 +570,12 @@ func (m *managerImpl) evictPods(activePods []*v1.Pod, statsFunc statsFunc, thres
     podsForEviction := []*v1.Pod{}
     for i := range activePods {
         pod := activePods[i]
-        if kubelettypes.IsCriticalPod(pod) {
+        if kubelettypes.IsCriticalPod- pod {
             continue
         }
         
         // 如果Pod标记为不可驱逐，跳过
-        if podutil.IsPodTerminating(pod) {
+        if podutil.IsPodTerminating- pod {
             continue
         }
         
@@ -402,18 +583,18 @@ func (m *managerImpl) evictPods(activePods []*v1.Pod, statsFunc statsFunc, thres
         podsForEviction = append(podsForEviction, pod)
         
         // 检查是否已满足回收要求
-        if len(podsForEviction) > 0 {
+        if len- podsForEviction > 0 {
             break
         }
     }
     
     // 驱逐选中的Pod
-    if len(podsForEviction) > 0 {
+    if len- podsForEviction > 0 {
         m.evictPod(podsForEviction[0], 0, "node has conditions", nil)
         return []*v1.Pod{podsForEviction[0]}
     }
     
-    klog.V(3).InfoS("eviction manager: unable to evict any pods from the node")
+    klog.V- 3.InfoS("eviction manager: unable to evict any pods from the node")
     return nil
 }
 ```
@@ -422,7 +603,7 @@ func (m *managerImpl) evictPods(activePods []*v1.Pod, statsFunc statsFunc, thres
 
 ## 驱逐阈值配置体系
 
-### 1. 硬阈值配置 (Hard Thresholds)
+### 1. 硬阈值配置 - Hard Thresholds
 
 硬阈值一旦触发会立即驱逐Pod，不提供宽限期：
 
@@ -435,7 +616,7 @@ evictionHard:
   pid.available: "1000"          # 可用PID低于1000时立即驱逐
 ```
 
-### 2. 软阈值配置 (Soft Thresholds)
+### 2. 软阈值配置 - Soft Thresholds
 
 软阈值提供宽限期，只有超过宽限期后才会驱逐Pod：
 
@@ -514,11 +695,11 @@ Pod按照QoS类别进行排序，优先级从高到低：
 // byEvictionPriority 实现Pod驱逐优先级排序
 type byEvictionPriority []*v1.Pod
 
-func (a byEvictionPriority) Len() int { return len(a) }
+func - a byEvictionPriority Len-  int { return len- a }
 
-func (a byEvictionPriority) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func - a byEvictionPriority Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 
-func (a byEvictionPriority) Less(i, j int) bool {
+func - a byEvictionPriority Less(i, j int) bool {
     // 首先按QoS类别比较
     qosComparison := v1qos.GetPodQOS(a[i]).Compare(v1qos.GetPodQOS(a[j]))
     if qosComparison != 0 {
@@ -526,7 +707,7 @@ func (a byEvictionPriority) Less(i, j int) bool {
     }
     
     // 同一QoS类别内，按优先级类别比较
-    if priorityClass.IsEnabled() {
+    if priorityClass.IsEnabled-  {
         podPriority := corev1helpers.PodPriority(a[i])
         otherPodPriority := corev1helpers.PodPriority(a[j])
         return podPriority < otherPodPriority
@@ -551,11 +732,11 @@ type byMemoryUsage struct {
     stats func(*v1.Pod) (statsapi.PodStats, bool)
 }
 
-func (m byMemoryUsage) Len() int { return len(m.pods) }
+func - m byMemoryUsage Len-  int { return len(m.pods) }
 
-func (m byMemoryUsage) Swap(i, j int) { m.pods[i], m.pods[j] = m.pods[j], m.pods[i] }
+func - m byMemoryUsage Swap(i, j int) { m.pods[i], m.pods[j] = m.pods[j], m.pods[i] }
 
-func (m byMemoryUsage) Less(i, j int) bool {
+func - m byMemoryUsage Less(i, j int) bool {
     _, podi := m.stats(m.pods[i])
     _, podj := m.stats(m.pods[j])
     if !podi || !podj {
@@ -585,7 +766,7 @@ func (m byMemoryUsage) Less(i, j int) bool {
         otherPodMemoryUsage := podMemoryUsage(m.pods[j], m.stats)
         otherPodMemoryRequests := resourcehelper.GetResourceRequest(m.pods[j], v1.ResourceMemory)
         
-        return podMemoryUsage.Sub(podMemoryRequests).Cmp(otherPodMemoryUsage.Sub(otherPodMemoryRequests)) > 0
+        return podMemoryUsage.Sub- podMemoryRequests.Cmp(otherPodMemoryUsage.Sub- otherPodMemoryRequests) > 0
     }
     
     return false
@@ -599,10 +780,10 @@ func (m byMemoryUsage) Less(i, j int) bool {
 ```go
 // IsCriticalPod 检查Pod是否为关键系统Pod
 func IsCriticalPod(pod *v1.Pod) bool {
-    if IsStaticPod(pod) {
+    if IsStaticPod- pod {
         return true
     }
-    if IsMirrorPod(pod) {
+    if IsMirrorPod- pod {
         return true
     }
     
@@ -618,7 +799,7 @@ func IsCriticalPod(pod *v1.Pod) bool {
 // 在驱逐过程中跳过关键Pod
 for i := range activePods {
     pod := activePods[i]
-    if kubelettypes.IsCriticalPod(pod) {
+    if kubelettypes.IsCriticalPod- pod {
         continue  // 跳过关键Pod
     }
     // ... 继续驱逐逻辑
@@ -658,7 +839,7 @@ func nodeConditions(thresholds []evictionapi.Threshold) []v1.NodeConditionType {
             conditions = append(conditions, nodeCondition)
         }
     }
-    return removeDuplicates(conditions)
+    return removeDuplicates- conditions
 }
 
 // 更新节点状态
@@ -678,7 +859,7 @@ func (m *managerImpl) updateNodeCondition(condition v1.NodeConditionType, now ti
 ```go
 // 在调度过程中检查节点条件
 func (pl *NodeResourcesFit) Filter(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
-    node := nodeInfo.Node()
+    node := nodeInfo.Node- 
     
     // 检查节点是否有压力条件
     for _, condition := range node.Status.Conditions {
@@ -916,7 +1097,7 @@ groups:
       severity: info
     annotations:
       summary: "Pod eviction detected"
-      description: "{{ $value }} pod(s) have been evicted in the last 5 minutes"
+      description: "{{ $value }} pod- s have been evicted in the last 5 minutes"
 
   - alert: HighPodEvictionRate
     expr: rate(kubelet_evictions_total[5m]) > 0.1
@@ -1120,18 +1301,18 @@ import (
     "time"
 )
 
-func main() {
+func main-  {
     server := &http.Server{
         Addr:    ":8080",
         Handler: http.DefaultServeMux,
     }
     
     // 启动服务器
-    go func() {
-        if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+    go func-  {
+        if err := server.ListenAndServe- ; err != nil && err != http.ErrServerClosed {
             log.Fatalf("Server failed to start: %v", err)
         }
-    }()
+    }- 
     
     // 优雅关闭处理
     c := make(chan os.Signal, 1)
@@ -1141,11 +1322,11 @@ func main() {
     log.Println("Shutting down gracefully...")
     
     // 创建关闭上下文，给应用30秒时间完成清理
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
+    ctx, cancel := context.WithTimeout(context.Background- , 30*time.Second)
+    defer cancel- 
     
     // 关闭HTTP服务器
-    if err := server.Shutdown(ctx); err != nil {
+    if err := server.Shutdown- ctx; err != nil {
         log.Printf("Server shutdown failed: %v", err)
     } else {
         log.Println("Server shutdown completed")

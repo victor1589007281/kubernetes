@@ -64,20 +64,17 @@ type PolicyRule struct {
 ```mermaid
 graph TB
     subgraph "**RBAC 权限控制架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**身份认证层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
-            USER[**用户 (User)**<br/>• 人类用户<br/>• 外部认证<br/>• 证书认证<br/>• OIDC 集成]
+            USER[**用户 - User**<br/>• 人类用户<br/>• 外部认证<br/>• 证书认证<br/>• OIDC 集成]
             
-            SA[**服务账号 (ServiceAccount)**<br/>• Pod 身份<br/>• Token 认证<br/>• 自动挂载<br/>• 命名空间隔离]
+            SA[**服务账号 - ServiceAccount**<br/>• Pod 身份<br/>• Token 认证<br/>• 自动挂载<br/>• 命名空间隔离]
             
-            GROUP[**用户组 (Group)**<br/>• 批量权限管理<br/>• 组织结构映射<br/>• 继承权限<br/>• 简化管理]
+            GROUP[**用户组 - Group**<br/>• 批量权限管理<br/>• 组织结构映射<br/>• 继承权限<br/>• 简化管理]
         end
         
         subgraph "**角色定义层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             ROLE[**Role**<br/>• 命名空间级别<br/>• 权限规则集合<br/>• 资源操作权限<br/>• 局部范围]
             
@@ -85,7 +82,6 @@ graph TB
         end
         
         subgraph "**绑定关系层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             ROLE_BINDING[**RoleBinding**<br/>• 命名空间绑定<br/>• Subject → Role<br/>• 局部权限分配<br/>• 多主体支持]
             
@@ -93,7 +89,6 @@ graph TB
         end
         
         subgraph "**权限验证层**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             RBAC_AUTHORIZER[**RBAC Authorizer**<br/>• 权限匹配<br/>• 规则解析<br/>• 决策引擎<br/>• 审计日志]
             
@@ -101,7 +96,6 @@ graph TB
         end
         
         subgraph "**访问决策**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             ALLOW[**允许访问**<br/>• 规则匹配成功<br/>• 记录审计日志<br/>• 继续请求处理<br/>• 返回成功]
             
@@ -206,10 +200,10 @@ metadata:
   name: pod-reader
 rules:
 - apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "watch", "list"]
+  resources: <pods
+  verbs: ["get", "watch", "list
 - apiGroups: [""]
-  resources: ["pods/log"]
+  resources: <pods/log
   verbs: ["get"]
 
 ---
@@ -220,9 +214,9 @@ metadata:
   name: secret-reader
 rules:
 - apiGroups: [""]
-  resources: ["secrets"]
-  verbs: ["get", "watch", "list"]
-- nonResourceURLs: ["/healthz", "/version"]
+  resources: <secrets
+  verbs: ["get", "watch", "list
+- nonResourceURLs: </healthz", "/version
   verbs: ["get"]
 ```
 
@@ -268,10 +262,8 @@ roleRef:
 ```mermaid
 graph TB
     subgraph "**RBAC 资源类型与关系**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**命名空间级别**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             NS_RESOURCES[**命名空间资源**<br/>• Pods, Services<br/>• ConfigMaps, Secrets<br/>• Deployments<br/>• PersistentVolumeClaims]
             
@@ -281,7 +273,6 @@ graph TB
         end
         
         subgraph "**集群级别**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             CLUSTER_RESOURCES[**集群资源**<br/>• Nodes, PersistentVolumes<br/>• ClusterRoles<br/>• Namespaces<br/>• CustomResourceDefinitions]
             
@@ -291,19 +282,16 @@ graph TB
         end
         
         subgraph "**主体类型**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             SUBJECTS[**权限主体**<br/>• **User**: 人类用户<br/>• **Group**: 用户组<br/>• **ServiceAccount**: 服务账号]
         end
         
         subgraph "**权限规则**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
-            POLICY_RULES[**PolicyRule 组成**<br/>• **APIGroups**: API组 ["", "apps", "extensions"]<br/>• **Resources**: 资源类型 ["pods", "services"]<br/>• **Verbs**: 动词 ["get", "list", "create"]<br/>• **ResourceNames**: 特定资源名<br/>• **NonResourceURLs**: 非资源URL]
+            POLICY_RULES[**PolicyRule 组成**<br/>• **APIGroups**: API组 core, apps, extensions<br/>• **Resources**: 资源类型 pods, services<br/>• **Verbs**: 动词 get, list, create<br/>• **ResourceNames**: 特定资源名<br/>• **NonResourceURLs**: 非资源URL]
         end
         
         subgraph "**绑定矩阵**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             BINDING_MATRIX[**绑定组合**<br/>• **RoleBinding + Role**: 命名空间权限<br/>• **RoleBinding + ClusterRole**: 降级集群角色<br/>• **ClusterRoleBinding + ClusterRole**: 全局权限<br/>• **ClusterRoleBinding + Role**: ❌ 不支持]
         end
@@ -349,7 +337,7 @@ type RBACAuthorizer struct {
 // Authorize 执行权限检查
 func (r *RBACAuthorizer) Authorize(ctx context.Context, requestAttributes authorizer.Attributes) (authorizer.Decision, string, error) {
     
-    rules, err := r.authorizationRuleResolver.RulesFor(requestAttributes.GetUser(), requestAttributes.GetNamespace())
+    rules, err := r.authorizationRuleResolver.RulesFor(requestAttributes.GetUser- , requestAttributes.GetNamespace- )
     if err != nil {
         return authorizer.DecisionNoOpinion, "", err
     }
@@ -363,20 +351,20 @@ func (r *RBACAuthorizer) Authorize(ctx context.Context, requestAttributes author
 
 // RuleAllows 检查单个规则是否允许请求
 func RuleAllows(requestAttributes authorizer.Attributes, rule *rbacv1.PolicyRule) bool {
-    if requestAttributes.IsResourceRequest() {
-        combinedResource := requestAttributes.GetResource()
-        if len(requestAttributes.GetSubresource()) > 0 {
-            combinedResource = requestAttributes.GetResource() + "/" + requestAttributes.GetSubresource()
+    if requestAttributes.IsResourceRequest-  {
+        combinedResource := requestAttributes.GetResource- 
+        if len(requestAttributes.GetSubresource- ) > 0 {
+            combinedResource = requestAttributes.GetResource-  + "/" + requestAttributes.GetSubresource- 
         }
 
-        return VerbMatches(rule, requestAttributes.GetVerb()) &&
-            APIGroupMatches(rule, requestAttributes.GetAPIGroup()) &&
-            ResourceMatches(rule, combinedResource, requestAttributes.GetSubresource()) &&
-            ResourceNameMatches(rule, requestAttributes.GetName())
+        return VerbMatches(rule, requestAttributes.GetVerb- ) &&
+            APIGroupMatches(rule, requestAttributes.GetAPIGroup- ) &&
+            ResourceMatches(rule, combinedResource, requestAttributes.GetSubresource- ) &&
+            ResourceNameMatches(rule, requestAttributes.GetName- )
     }
 
-    return VerbMatches(rule, requestAttributes.GetVerb()) &&
-        NonResourceURLMatches(rule, requestAttributes.GetPath())
+    return VerbMatches(rule, requestAttributes.GetVerb- ) &&
+        NonResourceURLMatches(rule, requestAttributes.GetPath- )
 }
 ```
 
@@ -433,10 +421,8 @@ flowchart TD
 ```mermaid
 graph TB
     subgraph "**Kubernetes 内置角色体系**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**系统核心角色**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             SYSTEM_ADMIN[**cluster-admin**<br/>• **权限**: 所有资源所有操作<br/>• **用途**: 集群超级管理员<br/>• **风险**: 最高权限<br/>• **使用**: 谨慎分配]
             
@@ -444,7 +430,6 @@ graph TB
         end
         
         subgraph "**用户操作角色**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             ADMIN_ROLE[**admin**<br/>• **权限**: 命名空间管理员<br/>• **范围**: 单个命名空间<br/>• **操作**: 所有资源 CRUD<br/>• **限制**: 不能修改角色权限]
             
@@ -454,7 +439,6 @@ graph TB
         end
         
         subgraph "**系统组件角色**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             SYSTEM_CONTROLLER[**system:controller:***<br/>• **kube-controller-manager**<br/>• **deployment-controller**<br/>• **replicaset-controller**<br/>• **job-controller**]
             
@@ -464,7 +448,6 @@ graph TB
         end
         
         subgraph "**特殊用途角色**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             SYSTEM_KUBE_PROXY[**system:kube-proxy**<br/>• **权限**: 网络代理权限<br/>• **用途**: kube-proxy 组件<br/>• **范围**: 服务、端点<br/>• **网络**: 节点网络管理]
             
@@ -472,7 +455,6 @@ graph TB
         end
         
         subgraph "**聚合角色特性**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             AGGREGATION[**角色聚合**<br/>• **edit** 聚合到 **admin**<br/>• **view** 聚合到 **edit**<br/>• 自动权限继承<br/>• 简化权限管理]
         end
@@ -497,19 +479,19 @@ graph TB
 ```yaml
 # cluster-admin - 超级管理员（慎用）
 rules:
-- apiGroups: ["*"]
-  resources: ["*"]
+- apiGroups: [""]*
+  resources: <*
   verbs: ["*"]
-- nonResourceURLs: ["*"]
+- nonResourceURLs: <*
   verbs: ["*"]
 
 # admin - 命名空间管理员
 rules:
 - apiGroups: [""]
-  resources: ["*"]
+  resources: <*
   verbs: ["*"]
-- apiGroups: ["apps", "extensions"]
-  resources: ["*"]
+- apiGroups: [""]apps", "extensions
+  resources: <*
   verbs: ["*"]
 # 不包括 roles, rolebindings 的创建权限
 
@@ -556,7 +538,7 @@ func ConfirmNoEscalation(ctx context.Context, ruleResolver rbacvalidation.Reques
     // 检查是否尝试获得超出当前权限的规则
     for _, rule := range rules {
         if !ruleCovers(userRules, rule) {
-            return fmt.Errorf("权限升级被拒绝：用户 %q 无法创建具有更高权限的角色", user.GetName())
+            return fmt.Errorf("权限升级被拒绝：用户 %q 无法创建具有更高权限的角色", user.GetName- )
         }
     }
 
@@ -615,40 +597,33 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph "**RBAC 权限设计最佳实践**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**最小权限原则**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             LEAST_PRIVILEGE[**最小权限原则**<br/>• 仅授予必要权限<br/>• 定期权限审核<br/>• 避免过度权限<br/>• 权限最小化]
         end
         
         subgraph "**角色分离**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             ROLE_SEPARATION[**职责分离**<br/>• **开发人员**: edit 权限<br/>• **运维人员**: admin 权限<br/>• **只读用户**: view 权限<br/>• **系统组件**: 专用角色]
         end
         
         subgraph "**命名空间隔离**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             NAMESPACE_ISOLATION[**命名空间隔离**<br/>• 按环境隔离权限<br/>• dev/staging/prod<br/>• 团队权限边界<br/>• 资源访问控制]
         end
         
         subgraph "**审计与监控**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             AUDIT_MONITORING[**审计监控**<br/>• 启用审计日志<br/>• 权限使用监控<br/>• 异常访问告警<br/>• 定期权限评估]
         end
         
         subgraph "**自动化管理**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             AUTOMATION[**自动化权限管理**<br/>• GitOps 权限管理<br/>• RBAC 配置即代码<br/>• 自动权限同步<br/>• 版本控制管理]
         end
         
         subgraph "**安全加固**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             SECURITY_HARDENING[**安全加固措施**<br/>• 禁用匿名访问<br/>• 强制认证<br/>• 网络策略配合<br/>• 准入控制集成]
         end
@@ -679,13 +654,13 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["pods", "services", "configmaps"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["apps"]
-  resources: ["deployments", "replicasets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  verbs: ["get", "list", "watch"]", "create", "update", "patch", "delete
+- apiGroups: [""]apps
+  resources: <deployments", "replicasets
+  verbs: ["get", "list", "watch"]", "create", "update", "patch", "delete
 - apiGroups: [""]
-  resources: ["pods/log", "pods/exec"]
-  verbs: ["get", "create"]
+  resources: <pods/log", "pods/exec
+  verbs: ["get", "create
 
 ---
 # 绑定到开发命名空间
@@ -722,12 +697,12 @@ metadata:
   name: prometheus
 rules:
 - apiGroups: [""]
-  resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+  resources: <nodes", "nodes/proxy", "services", "endpoints", "pods
   verbs: ["get", "list", "watch"]
 - apiGroups: [""]
-  resources: ["configmaps"]
+  resources: <configmaps
   verbs: ["get"]
-- nonResourceURLs: ["/metrics"]
+- nonResourceURLs: </metrics
   verbs: ["get"]
 
 ---

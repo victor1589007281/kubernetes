@@ -16,7 +16,7 @@
 
 ## 概述
 
-Pod 安全策略是 Kubernetes 中用于控制 Pod 安全上下文的重要机制。从 Kubernetes 1.25 版本开始，传统的 PodSecurityPolicy 已被移除，取而代之的是更加简洁高效的 Pod Security Standards (PSS) 和 Pod Security Admission (PSA)。本文档基于 Kubernetes 源码深入解读 Pod 安全策略的架构设计、工作原理和迁移策略。
+Pod 安全策略是 Kubernetes 中用于控制 Pod 安全上下文的重要机制。从 Kubernetes 1.25 版本开始，传统的 PodSecurityPolicy 已被移除，取而代之的是更加简洁高效的 Pod Security Standards - PSS 和 Pod Security Admission - PSA。本文档基于 Kubernetes 源码深入解读 Pod 安全策略的架构设计、工作原理和迁移策略。
 
 ### 核心特性
 
@@ -90,10 +90,8 @@ metadata:
 ```mermaid
 graph TB
     subgraph "**Pod 安全策略演进对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**传统 PodSecurityPolicy（已弃用）**"
-            style subgraph fill:#ffe6e6,stroke:#cc0000,stroke-width:2px
             
             PSP_RESOURCES[**PodSecurityPolicy 资源**<br/>• policy/v1beta1 API<br/>• 复杂的策略定义<br/>• 自定义规则配置<br/>• RBAC 强依赖]
             
@@ -103,7 +101,6 @@ graph TB
         end
         
         subgraph "**现代 Pod Security Standards**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             PSS_LEVELS[**三级安全标准**<br/>• **Privileged**: 无限制<br/>• **Baseline**: 基础安全<br/>• **Restricted**: 严格安全<br/>• 预定义策略]
             
@@ -113,7 +110,6 @@ graph TB
         end
         
         subgraph "**迁移路径**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             MIGRATION_STEPS[**迁移步骤**<br/>• **评估现有策略**: 分析当前PSP配置<br/>• **映射安全级别**: 选择合适的PSS级别<br/>• **测试验证**: 在测试环境验证<br/>• **分阶段迁移**: 逐步替换PSP]
             
@@ -165,10 +161,8 @@ const (
 ```mermaid
 graph TB
     subgraph "**Pod Security Standards 安全级别对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**Privileged 级别**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             PRIVILEGED[**Privileged 特性**<br/>• **无任何限制**: 允许所有操作<br/>• **特权容器**: 允许privileged=true<br/>• **主机网络**: 允许hostNetwork<br/>• **主机PID**: 允许hostPID<br/>• **主机路径**: 允许hostPath卷<br/>• **所有能力**: 允许所有capabilities]
             
@@ -176,7 +170,6 @@ graph TB
         end
         
         subgraph "**Baseline 级别**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             BASELINE[**Baseline 限制**<br/>• **禁止特权容器**: privileged=false<br/>• **禁止主机网络**: hostNetwork=false<br/>• **禁止主机PID**: hostPID=false<br/>• **限制主机路径**: 禁用hostPath卷<br/>• **限制能力**: 禁用危险capabilities<br/>• **限制端口**: 禁用特权端口绑定]
             
@@ -184,21 +177,18 @@ graph TB
         end
         
         subgraph "**Restricted 级别**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
-            RESTRICTED[**Restricted 严格限制**<br/>• **包含Baseline所有限制**<br/>• **强制非root**: runAsNonRoot=true<br/>• **禁止特权升级**: allowPrivilegeEscalation=false<br/>• **丢弃所有能力**: capabilities.drop=[\"ALL\"]<br/>• **Seccomp配置**: 要求RuntimeDefault<br/>• **限制卷类型**: 仅允许安全卷类型]
+            RESTRICTED[**Restricted 严格限制**<br/>• **包含Baseline所有限制**<br/>• **强制非root**: runAsNonRoot=true<br/>• **禁止特权升级**: allowPrivilegeEscalation=false<br/>• **丢弃所有能力**: capabilities.drop=ALL<br/>• **Seccomp配置**: 要求RuntimeDefault<br/>• **限制卷类型**: 仅允许安全卷类型]
             
             RESTRICTED_USE[**适用场景**<br/>• 高安全要求应用<br/>• 多租户环境<br/>• 金融应用<br/>• 敏感数据处理<br/>• 合规要求场景]
         end
         
         subgraph "**策略检查机制**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             POLICY_CHECK[**检查维度**<br/>• **容器安全上下文**: privileged、capabilities<br/>• **Pod安全上下文**: runAsUser、fsGroup<br/>• **卷类型**: hostPath、emptyDir、secret<br/>• **主机资源**: network、PID、IPC<br/>• **Seccomp配置**: profile类型和配置]
         end
         
         subgraph "**执行模式**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             EXECUTION_MODES[**三种执行模式**<br/>• **enforce**: 拒绝违反策略的Pod<br/>• **audit**: 记录违反策略的事件<br/>• **warn**: 向用户发出警告<br/>• **组合使用**: 可同时配置多种模式]
         end
@@ -229,10 +219,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**Pod Security Admission 整体架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**配置层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             NS_LABELS[**命名空间标签**<br/>• pod-security.kubernetes.io/enforce<br/>• pod-security.kubernetes.io/audit<br/>• pod-security.kubernetes.io/warn<br/>• pod-security.kubernetes.io/enforce-version]
             
@@ -240,7 +228,6 @@ graph TB
         end
         
         subgraph "**API Server 集成**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             API_SERVER[**API Server**<br/>• 接收Pod创建请求<br/>• 触发准入控制链<br/>• 返回准入决策<br/>• 记录审计日志]
             
@@ -248,7 +235,6 @@ graph TB
         end
         
         subgraph "**Pod Security Admission 核心**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             PSA_PLUGIN[**PSA 插件**<br/>• 策略解析器<br/>• 规则评估引擎<br/>• 违规检测<br/>• 决策生成]
             
@@ -256,7 +242,6 @@ graph TB
         end
         
         subgraph "**检查器集合**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             BASELINE_CHECKS[**Baseline 检查器**<br/>• 特权容器检查<br/>• 主机网络检查<br/>• 主机路径检查<br/>• 能力检查<br/>• 端口检查]
             
@@ -264,7 +249,6 @@ graph TB
         end
         
         subgraph "**决策与执行**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             DECISION_LOGIC[**决策逻辑**<br/>• Enforce模式: 拒绝违规Pod<br/>• Audit模式: 记录审计事件<br/>• Warn模式: 返回警告信息<br/>• 豁免处理: 跳过检查]
             
@@ -307,8 +291,8 @@ type Plugin struct {
 
 // Validate 验证 Pod 是否符合安全策略
 func (p *Plugin) Validate(ctx context.Context, a admission.Attributes, o admission.ObjectInterfaces) error {
-    gr := a.GetResource().GroupResource()
-    if !applicableResources[gr] && !p.delegate.PodSpecExtractor.HasPodSpec(gr) {
+    gr := a.GetResource- .GroupResource- 
+    if !applicableResources[gr] && !p.delegate.PodSpecExtractor.HasPodSpec- gr {
         return nil
     }
 
@@ -355,7 +339,7 @@ func (p *Plugin) Validate(ctx context.Context, a admission.Attributes, o admissi
 
 ```go
 // CheckPrivileged 检查特权容器
-func CheckPrivileged() Check {
+func CheckPrivileged-  Check {
     return Check{
         ID:    "privileged",
         Level: api.LevelBaseline,
@@ -385,7 +369,7 @@ func privileged_1_0(podMetadata *metav1.ObjectMeta, podSpec *corev1.PodSpec) Che
         }
     }
     
-    if len(badContainers) > 0 {
+    if len- badContainers > 0 {
         return CheckResult{
             Allowed:         false,
             ForbiddenReason: "privileged",
@@ -470,34 +454,34 @@ sequenceDiagram
 func (a *Admission) EvaluatePod(ctx context.Context, nsPolicy api.Policy, nsPolicyErr error, 
     podMetadata *metav1.ObjectMeta, podSpec *corev1.PodSpec, attrs api.Attributes, enforce bool) *admissionv1.AdmissionResponse {
     
-    logger := klog.FromContext(ctx)
+    logger := klog.FromContext- ctx
     
     // 豁免运行时类检查
     if a.exemptRuntimeClass(podSpec.RuntimeClassName) {
-        a.Metrics.RecordExemption(attrs)
+        a.Metrics.RecordExemption- attrs
         return sharedAllowedByRuntimeClassExemptionResponse
     }
 
     auditAnnotations := map[string]string{}
     if nsPolicyErr != nil {
-        logger.V(2).Info("failed to parse PodSecurity namespace labels", "err", nsPolicyErr)
-        auditAnnotations["error"] = fmt.Sprintf("Failed to parse policy: %v", nsPolicyErr)
+        logger.V- 2.Info("failed to parse PodSecurity namespace labels", "err", nsPolicyErr)
+        auditAnnotations<error = fmt.Sprintf("Failed to parse policy: %v", nsPolicyErr)
         a.Metrics.RecordError(false, attrs)
     }
 
     cachedResults := make(map[api.LevelVersion]policy.AggregateCheckResult)
-    response := allowedResponse()
+    response := allowedResponse- 
     
     // Enforce 模式检查
     if enforce {
-        auditAnnotations[api.EnforcedPolicyAnnotationKey] = nsPolicy.Enforce.String()
+        auditAnnotations[api.EnforcedPolicyAnnotationKey] = nsPolicy.Enforce.String- 
         
         result := policy.AggregateCheckResults(a.Evaluator.EvaluatePod(nsPolicy.Enforce, podMetadata, podSpec))
         if !result.Allowed {
             response = forbiddenResponse(attrs, fmt.Errorf(
                 "violates PodSecurity %q: %s",
-                nsPolicy.Enforce.String(),
-                result.ForbiddenDetail(),
+                nsPolicy.Enforce.String- ,
+                result.ForbiddenDetail- ,
             ))
             a.Metrics.RecordEvaluation(metrics.DecisionDeny, nsPolicy.Enforce, metrics.ModeEnforce, attrs)
         } else {
@@ -515,8 +499,8 @@ func (a *Admission) EvaluatePod(ctx context.Context, nsPolicy api.Policy, nsPoli
     if !auditResult.Allowed {
         auditAnnotations[api.AuditViolationsAnnotationKey] = fmt.Sprintf(
             "would violate PodSecurity %q: %s",
-            nsPolicy.Audit.String(),
-            auditResult.ForbiddenDetail(),
+            nsPolicy.Audit.String- ,
+            auditResult.ForbiddenDetail- ,
         )
         a.Metrics.RecordEvaluation(metrics.DecisionDeny, nsPolicy.Audit, metrics.ModeAudit, attrs)
     }
@@ -530,8 +514,8 @@ func (a *Admission) EvaluatePod(ctx context.Context, nsPolicy api.Policy, nsPoli
         if !warnResult.Allowed {
             response.Warnings = append(response.Warnings, fmt.Sprintf(
                 "would violate PodSecurity %q: %s",
-                nsPolicy.Warn.String(),
-                warnResult.ForbiddenDetail(),
+                nsPolicy.Warn.String- ,
+                warnResult.ForbiddenDetail- ,
             ))
             a.Metrics.RecordEvaluation(metrics.DecisionDeny, nsPolicy.Warn, metrics.ModeWarn, attrs)
         }
@@ -682,10 +666,8 @@ spec:
 ```mermaid
 graph TB
     subgraph "**Pod Security Standards 配置策略**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**环境分层配置**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             PRODUCTION[**生产环境**<br/>• **enforce**: restricted<br/>• **audit**: restricted<br/>• **warn**: restricted<br/>• **最高安全级别**]
             
@@ -695,7 +677,6 @@ graph TB
         end
         
         subgraph "**命名空间分类策略**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             SYSTEM_NS[**系统命名空间**<br/>• **kube-system**: privileged<br/>• **kube-public**: privileged<br/>• **监控命名空间**: baseline<br/>• **网络插件**: privileged]
             
@@ -705,7 +686,6 @@ graph TB
         end
         
         subgraph "**渐进式实施**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             PHASE1[**第一阶段**<br/>• **audit**: restricted<br/>• **warn**: baseline<br/>• **enforce**: privileged<br/>• **收集违规数据**]
             
@@ -715,7 +695,6 @@ graph TB
         end
         
         subgraph "**监控与调优**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             MONITORING[**监控指标**<br/>• **违规事件数量**: 审计日志统计<br/>• **拒绝率**: enforce模式拒绝比例<br/>• **警告频率**: warn模式触发次数<br/>• **豁免使用**: 豁免规则命中率]
             

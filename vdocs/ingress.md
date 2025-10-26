@@ -74,10 +74,8 @@ type HTTPIngressPath struct {
 ```mermaid
 graph TB
     subgraph "**Ingress 架构全景**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**外部访问层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             INTERNET[**互联网流量**<br/>• HTTPS: app.example.com<br/>• HTTP: api.example.com<br/>• 多域名访问<br/>• SSL/TLS 加密]
             
@@ -85,7 +83,6 @@ graph TB
         end
         
         subgraph "**Ingress 控制层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             INGRESS_CONTROLLER[**Ingress Controller**<br/>• NGINX/HAProxy/Traefik<br/>• 配置生成<br/>• 证书管理<br/>• 监控指标]
             
@@ -95,7 +92,6 @@ graph TB
         end
         
         subgraph "**服务发现层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             SERVICE_MESH[**Service 网格**<br/>• ClusterIP Service<br/>• NodePort Service<br/>• 负载均衡<br/>• 健康检查]
             
@@ -103,13 +99,11 @@ graph TB
         end
         
         subgraph "**应用服务层**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             BACKEND_APPS[**后端应用**<br/>• Web 应用<br/>• API 服务<br/>• 微服务<br/>• 数据库接口]
         end
         
         subgraph "**证书管理**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             TLS_CERTS[**TLS 证书**<br/>• Let's Encrypt<br/>• 自签名证书<br/>• 商业 CA<br/>• 证书轮换]
             
@@ -247,28 +241,23 @@ flowchart TD
 ```mermaid
 graph TB
     subgraph "**Ingress 路由优先级规则**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**主机匹配优先级**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             HOST_PRIORITY[**主机匹配优先级**<br/>**1. 精确主机名**<br/>  • app.example.com<br/>**2. 通配符主机名**<br/>  • *.example.com<br/>**3. 空主机名**<br/>  • 匹配所有主机]
         end
         
         subgraph "**路径匹配优先级**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             PATH_PRIORITY[**路径匹配优先级**<br/>**1. 最长前缀匹配**<br/>  • /api/v1/users > /api/v1 > /api<br/>**2. 精确匹配 > 前缀匹配**<br/>  • Exact > Prefix<br/>**3. 实现特定匹配**<br/>  • 由控制器决定]
         end
         
         subgraph "**规则排序示例**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
-            RULE_EXAMPLE[**规则优先级示例**<br/>**优先级 1**: app.example.com/api/v1/users (Exact)<br/>**优先级 2**: app.example.com/api/v1/* (Prefix)<br/>**优先级 3**: app.example.com/api/* (Prefix)<br/>**优先级 4**: *.example.com/api/* (Prefix)<br/>**优先级 5**: /api/* (Prefix, 无主机限制)]
+            RULE_EXAMPLE[**规则优先级示例**<br/>**优先级 1**: app.example.com/api/v1/users - Exact<br/>**优先级 2**: app.example.com/api/v1/* - Prefix<br/>**优先级 3**: app.example.com/api/* - Prefix<br/>**优先级 4**: *.example.com/api/* - Prefix<br/>**优先级 5**: /api/* - Prefix - 无主机限制]
         end
         
         subgraph "**冲突解决策略**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             CONFLICT_RESOLUTION[**冲突解决**<br/>**• 多个规则匹配时选择最具体的**<br/>**• 相同优先级按定义顺序**<br/>**• 控制器实现可能不同**<br/>**• 建议避免规则冲突**]
         end
@@ -318,10 +307,8 @@ spec:
 ```mermaid
 graph TB
     subgraph "**TLS 终端处理流程**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**证书准备阶段**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CERT_SOURCE[**证书来源**<br/>• Let's Encrypt<br/>• 商业 CA<br/>• 自签名证书<br/>• 企业 PKI]
             
@@ -329,7 +316,6 @@ graph TB
         end
         
         subgraph "**TLS 握手阶段**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             CLIENT_HELLO[**1. Client Hello**<br/>• 支持的密码套件<br/>• TLS 版本<br/>• 随机数<br/>• SNI 扩展]
             
@@ -339,7 +325,6 @@ graph TB
         end
         
         subgraph "**证书验证阶段**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             CERT_VALIDATION[**证书验证**<br/>• 证书链验证<br/>• 域名匹配<br/>• 有效期检查<br/>• 撤销状态检查]
             
@@ -347,7 +332,6 @@ graph TB
         end
         
         subgraph "**数据传输阶段**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             DECRYPTION[**数据解密**<br/>• TLS 解密<br/>• 完整性验证<br/>• HTTP 提取<br/>• 会话复用]
             
@@ -382,10 +366,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**Ingress Controller 生态对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**NGINX Ingress Controller**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             NGINX_FEATURES[**NGINX 特性**<br/>• **性能**: 高性能反向代理<br/>• **功能**: 丰富的注解支持<br/>• **社区**: 活跃的社区<br/>• **生态**: 成熟的生态系统]
             
@@ -393,7 +375,6 @@ graph TB
         end
         
         subgraph "**HAProxy Ingress**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             HAPROXY_FEATURES[**HAProxy 特性**<br/>• **负载均衡**: 企业级负载均衡<br/>• **统计**: 详细的统计信息<br/>• **健康检查**: 高级健康检查<br/>• **性能**: 极高的并发性能]
             
@@ -401,7 +382,6 @@ graph TB
         end
         
         subgraph "**Traefik**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             TRAEFIK_FEATURES[**Traefik 特性**<br/>• **自动发现**: 自动服务发现<br/>• **动态配置**: 零宕机配置更新<br/>• **监控**: 内置监控仪表板<br/>• **协议**: 多协议支持]
             
@@ -409,7 +389,6 @@ graph TB
         end
         
         subgraph "**云厂商控制器**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             CLOUD_FEATURES[**云原生特性**<br/>• **集成**: 深度云服务集成<br/>• **管理**: 托管服务<br/>• **扩展**: 自动扩展<br/>• **安全**: 云安全集成]
             
@@ -417,7 +396,6 @@ graph TB
         end
         
         subgraph "**选择决策矩阵**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             DECISION_MATRIX[**选择建议**<br/>**高性能需求**: NGINX/HAProxy<br/>**企业级特性**: HAProxy<br/>**云环境**: 云厂商控制器<br/>**微服务**: Traefik<br/>**通用场景**: NGINX<br/>**简单部署**: Traefik]
         end
@@ -465,18 +443,15 @@ spec:
 ```mermaid
 graph TB
     subgraph "**多 Ingress Controller 管理架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**IngressClass 管理层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
-            DEFAULT_CLASS[**默认 IngressClass**<br/>• nginx (is-default-class)<br/>• 自动选择<br/>• 向下兼容<br/>• 集群默认]
+            DEFAULT_CLASS[**默认 IngressClass**<br/>• nginx - is-default-class<br/>• 自动选择<br/>• 向下兼容<br/>• 集群默认]
             
             CUSTOM_CLASSES[**自定义 IngressClass**<br/>• traefik-public<br/>• haproxy-internal<br/>• alb-external<br/>• 特定用途]
         end
         
         subgraph "**控制器实例**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             NGINX_CTRL[**NGINX Controller**<br/>• Class: nginx<br/>• 命名空间: nginx-system<br/>• 监听端口: 80/443<br/>• 配置: nginx-configmap]
             
@@ -486,7 +461,6 @@ graph TB
         end
         
         subgraph "**Ingress 资源分配**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             PUBLIC_INGRESS[**公网 Ingress**<br/>• ingressClassName: nginx<br/>• 公网域名<br/>• SSL 证书<br/>• 高可用]
             
@@ -496,7 +470,6 @@ graph TB
         end
         
         subgraph "**服务暴露策略**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             LOAD_BALANCER[**LoadBalancer Service**<br/>• 云负载均衡器<br/>• 外部 IP 分配<br/>• 多可用区<br/>• 健康检查]
             
@@ -590,28 +563,23 @@ spec:
 ```mermaid
 graph TB
     subgraph "**Ingress 最佳实践**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**安全实践**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             SECURITY[**安全配置**<br/>• **HTTPS 强制**: 重定向 HTTP<br/>• **HSTS**: 启用严格传输安全<br/>• **证书管理**: 自动续期<br/>• **访问控制**: IP 白名单]
         end
         
         subgraph "**性能优化**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             PERFORMANCE[**性能调优**<br/>• **连接复用**: Keep-alive<br/>• **压缩**: Gzip/Brotli<br/>• **缓存**: 静态资源缓存<br/>• **限流**: 请求速率限制]
         end
         
         subgraph "**监控观察**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             MONITORING[**监控配置**<br/>• **指标**: Prometheus 监控<br/>• **日志**: 访问日志收集<br/>• **追踪**: 分布式追踪<br/>• **告警**: 异常告警]
         end
         
         subgraph "**运维管理**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             OPERATIONS[**运维实践**<br/>• **蓝绿部署**: 零宕机发布<br/>• **金丝雀**: 渐进式发布<br/>• **备份**: 配置备份<br/>• **灾备**: 多区域部署]
         end

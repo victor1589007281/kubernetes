@@ -46,11 +46,9 @@ errors → health → ready → kubernetes → prometheus → forward → cache 
 
 ```mermaid
 graph TB
-    subgraph "**CoreDNS 插件生态系统**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
+    subgraph CoreDNSPlugins ["**CoreDNS 插件生态系统**"]
         
         subgraph "**核心功能插件**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             KUBERNETES[**kubernetes 插件**<br/>• Service 解析<br/>• Pod DNS 记录<br/>• Namespace 支持<br/>• 反向解析]
             
@@ -60,7 +58,6 @@ graph TB
         end
         
         subgraph "**监控健康插件**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             HEALTH[**health 插件**<br/>• 健康检查端点<br/>• liveness probe<br/>• 服务状态监控<br/>• 优雅关闭]
             
@@ -70,7 +67,6 @@ graph TB
         end
         
         subgraph "**辅助功能插件**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             ERRORS[**errors 插件**<br/>• 错误日志记录<br/>• 查询失败统计<br/>• 调试信息<br/>• 故障分析]
             
@@ -80,7 +76,6 @@ graph TB
         end
         
         subgraph "**性能优化插件**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             LOADBALANCE[**loadbalance 插件**<br/>• 响应随机化<br/>• A记录轮询<br/>• 负载分散<br/>• 连接均衡]
             
@@ -88,7 +83,6 @@ graph TB
         end
         
         subgraph "**扩展插件示例**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             CUSTOM_PLUGINS[**扩展插件**<br/>• **rewrite**: URL重写<br/>• **hosts**: 静态解析<br/>• **file**: 区域文件<br/>• **etcd**: 分布式存储<br/>• **consul**: 服务发现]
         end
@@ -123,10 +117,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**Kubernetes CoreDNS 整体架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**客户端层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             PODS[**Pod 应用**<br/>• DNS 客户端<br/>• 域名解析请求<br/>• 服务发现<br/>• 配置dnsPolicy]
             
@@ -134,15 +126,13 @@ graph TB
         end
         
         subgraph "**CoreDNS 服务层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
-            COREDNS_SERVICE[**kube-dns Service**<br/>• ClusterIP: 10.96.0.10<br/>• 端口: 53 (UDP/TCP)<br/>• 负载均衡<br/>• 高可用入口]
+            COREDNS_SERVICE[**kube-dns Service**<br/>• ClusterIP: 10.96.0.10<br/>• 端口: 53 - UDP/TCP<br/>• 负载均衡<br/>• 高可用入口]
             
             COREDNS_PODS[**CoreDNS Pod集群**<br/>• Deployment 部署<br/>• 多副本高可用<br/>• 反亲和调度<br/>• 资源限制]
         end
         
         subgraph "**配置与权限**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             CONFIGMAP[**CoreDNS ConfigMap**<br/>• Corefile 配置<br/>• 插件配置<br/>• 域名设置<br/>• 转发规则]
             
@@ -150,7 +140,6 @@ graph TB
         end
         
         subgraph "**Kubernetes API 集成**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             API_SERVER[**API Server**<br/>• Service 资源<br/>• Endpoint 资源<br/>• Namespace 资源<br/>• Pod 资源]
             
@@ -158,7 +147,6 @@ graph TB
         end
         
         subgraph "**外部DNS集成**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             UPSTREAM[**上游 DNS**<br/>• 递归查询<br/>• 外部域名解析<br/>• 根域名服务器<br/>• ISP DNS 服务器]
             
@@ -166,7 +154,6 @@ graph TB
         end
         
         subgraph "**监控观测**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             MONITORING[**监控系统**<br/>• Prometheus 抓取<br/>• Grafana 展示<br/>• 告警规则<br/>• 性能指标]
             
@@ -504,9 +491,9 @@ func (c *Configurer) GetPodDNS(pod *v1.Pod) (*runtimeapi.DNSConfig, error) {
         return nil, err
     }
 
-    dnsType, err := getPodDNSType(pod)
+    dnsType, err := getPodDNSType- pod
     if err != nil {
-        klog.ErrorS(err, "Failed to get DNS type for pod. Falling back to DNSClusterFirst policy.", "pod", klog.KObj(pod))
+        klog.ErrorS(err, "Failed to get DNS type for pod. Falling back to DNSClusterFirst policy.", "pod", klog.KObj- pod)
         dnsType = podDNSCluster
     }
     
@@ -519,7 +506,7 @@ func (c *Configurer) GetPodDNS(pod *v1.Pod) (*runtimeapi.DNSConfig, error) {
             // DNSClusterFirst 策略 - 使用 CoreDNS
             dnsConfig.Servers = []string{}
             for _, ip := range c.clusterDNS {
-                dnsConfig.Servers = append(dnsConfig.Servers, ip.String())
+                dnsConfig.Servers = append(dnsConfig.Servers, ip.String- )
             }
             dnsConfig.Searches = c.generateSearchesForDNSClusterFirst(dnsConfig.Searches, pod)
             dnsConfig.Options = defaultDNSOptions
@@ -531,7 +518,7 @@ func (c *Configurer) GetPodDNS(pod *v1.Pod) (*runtimeapi.DNSConfig, error) {
         // 使用宿主机 DNS 设置
         if c.ResolverConfig == "" {
             for _, nodeIP := range c.nodeIPs {
-                if utilnet.IsIPv6(nodeIP) {
+                if utilnet.IsIPv6- nodeIP {
                     dnsConfig.Servers = append(dnsConfig.Servers, "::1")
                 } else {
                     dnsConfig.Servers = append(dnsConfig.Servers, "127.0.0.1")
@@ -650,10 +637,8 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph "**CoreDNS 支持的 DNS 记录类型**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**Service 记录类型**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             SERVICE_A[**Service A 记录**<br/>• **格式**: service.namespace.svc.cluster.local<br/>• **解析**: ClusterIP地址<br/>• **示例**: web.default.svc.cluster.local → 10.96.100.1<br/>• **TTL**: 30秒]
             
@@ -661,7 +646,6 @@ graph TB
         end
         
         subgraph "**Pod 记录类型**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             POD_A[**Pod A 记录**<br/>• **格式**: pod-ip.namespace.pod.cluster.local<br/>• **解析**: Pod IP地址<br/>• **示例**: 172-17-0-3.default.pod.cluster.local → 172.17.0.3<br/>• **配置**: pods insecure]
             
@@ -669,7 +653,6 @@ graph TB
         end
         
         subgraph "**Endpoint 记录类型**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             ENDPOINT_A[**Endpoint A 记录**<br/>• **格式**: endpoint.service.namespace.svc.cluster.local<br/>• **解析**: 后端Pod IP集合<br/>• **示例**: web.default.svc.cluster.local → 多个Pod IP<br/>• **负载**: 轮询返回]
             
@@ -677,7 +660,6 @@ graph TB
         end
         
         subgraph "**特殊记录类型**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             WILDCARD[**通配符查询**<br/>• **格式**: *.namespace.svc.cluster.local<br/>• **解析**: 命名空间所有Service<br/>• **限制**: 需要特殊配置<br/>• **安全**: 默认禁用]
             
@@ -685,7 +667,6 @@ graph TB
         end
         
         subgraph "**DNS 搜索域**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             SEARCH_DOMAINS[**搜索域顺序**<br/>• **1**: namespace.svc.cluster.local<br/>• **2**: svc.cluster.local<br/>• **3**: cluster.local<br/>• **4**: 主机搜索域<br/>• **优化**: 完整域名查询更快]
         end
@@ -976,10 +957,8 @@ spec:
 ```mermaid
 graph TB
     subgraph "**CoreDNS 扩展性架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**水平扩展**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             REPLICA_SET[**多副本部署**<br/>• 3+ CoreDNS 副本<br/>• Pod 反亲和调度<br/>• 负载均衡分发<br/>• 故障自动恢复]
             
@@ -987,7 +966,6 @@ graph TB
         end
         
         subgraph "**垂直扩展**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             RESOURCES[**资源配置调优**<br/>• CPU/内存限制调整<br/>• 基于集群规模配置<br/>• 监控资源使用率<br/>• VPA 自动调整]
             
@@ -995,7 +973,6 @@ graph TB
         end
         
         subgraph "**缓存优化**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             DNS_CACHE[**DNS 缓存策略**<br/>• 多级缓存架构<br/>• TTL 优化配置<br/>• 预取机制<br/>• 缓存命中率监控]
             
@@ -1003,7 +980,6 @@ graph TB
         end
         
         subgraph "**网络优化**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             NETWORK_POLICY[**网络策略优化**<br/>• DNS流量路由优化<br/>• 就近访问原则<br/>• 网络延迟监控<br/>• QoS 流量控制]
             
@@ -1011,7 +987,6 @@ graph TB
         end
         
         subgraph "**监控与调优**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             MONITORING[**性能监控**<br/>• QPS/延迟指标<br/>• 错误率监控<br/>• 资源使用监控<br/>• 告警规则配置]
             
@@ -1238,6 +1213,172 @@ spec:
         - name: GOMAXPROCS
           value: "4"                    # 限制Go并发数
 ```
+
+---
+
+## 配置使用本地 Node DNS Server
+
+### 配置 CoreDNS 转发到节点 DNS
+
+在某些场景下，需要 CoreDNS 将特定域名的查询转发到宿主机节点的 DNS 服务器进行解析（例如：企业内网域名）。
+
+#### 配置方法
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health {
+            lameduck 5s
+        }
+        ready
+        
+        # Kubernetes 集群域名解析
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+            pods insecure
+            fallthrough in-addr.arpa ip6.arpa
+            ttl 30
+        }
+        
+        # 转发到宿主机 DNS（使用 /etc/resolv.conf）
+        forward . /etc/resolv.conf {
+            prefer_udp
+            policy sequential
+            health_check 5s
+        }
+        
+        # 或指定特定节点 DNS 服务器
+        # forward . 192.168.1.1 8.8.8.8
+        
+        prometheus :9153
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+    
+    # 企业内网域名单独配置
+    example.corp:53 {
+        errors
+        cache 30
+        # 转发到企业内网 DNS
+        forward . 10.0.0.53 10.0.0.54
+    }
+```
+
+#### 使用节点本地 DNS 配置
+
+**方式 1：使用 `/etc/resolv.conf`**
+
+CoreDNS Pod 会继承节点的 `/etc/resolv.conf`：
+
+```yaml
+spec:
+  dnsPolicy: Default  # 使用宿主机 DNS 配置
+  containers:
+  - name: coredns
+    volumeMounts:
+    - name: host-resolv
+      mountPath: /etc/resolv.conf
+      readOnly: true
+  volumes:
+  - name: host-resolv
+    hostPath:
+      path: /etc/resolv.conf
+      type: File
+```
+
+**方式 2：显式指定节点 DNS**
+
+```yaml
+forward . 169.254.169.254  # 云环境元数据服务
+forward . 192.168.1.1      # 本地网关 DNS
+forward . /etc/resolv.conf # 节点默认 DNS
+```
+
+#### 完整示例：混合 DNS 解析
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    # 集群内部域名
+    cluster.local:53 {
+        errors
+        cache 30
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+            pods insecure
+            fallthrough in-addr.arpa ip6.arpa
+        }
+    }
+    
+    # 企业内网域名
+    corp.example.com:53 {
+        errors
+        cache 300
+        forward . 10.10.10.53 10.10.10.54 {
+            policy sequential
+            health_check 10s
+        }
+    }
+    
+    # 其他域名使用节点 DNS
+    .:53 {
+        errors
+        health
+        ready
+        
+        # 优先使用节点 /etc/resolv.conf 中的 DNS
+        forward . /etc/resolv.conf {
+            prefer_udp
+            max_fails 3
+            expire 10s
+            policy sequential
+        }
+        
+        prometheus :9153
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+```
+
+#### 验证配置
+
+```bash
+# 1. 查看 CoreDNS 配置
+kubectl get configmap coredns -n kube-system -o yaml
+
+# 2. 测试 DNS 解析
+kubectl run -it --rm debug --image=busybox --restart=Never -- nslookup example.corp
+
+# 3. 查看 CoreDNS 日志
+kubectl logs -n kube-system -l k8s-app=kube-dns --tail=50
+
+# 4. 在 CoreDNS Pod 中检查 /etc/resolv.conf
+kubectl exec -n kube-system coredns-xxxxx -- cat /etc/resolv.conf
+```
+
+#### 注意事项
+
+1. **DNS 循环依赖**：避免 CoreDNS 转发到集群 Service IP，会导致循环查询
+2. **性能影响**：节点 DNS 查询会增加延迟，建议使用缓存
+3. **健康检查**：配置 `health_check` 检测上游 DNS 可用性
+4. **策略选择**：
+   - `random`: 随机选择上游 DNS
+   - `round_robin`: 轮询
+   - `sequential`: 顺序尝试（推荐）
 
 ---
 

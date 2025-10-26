@@ -66,10 +66,8 @@ type LeaseSpec struct {
 ```mermaid
 graph TB
     subgraph "**Kubernetes Lease 应用类型分类**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**Leader Election Lease**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CONTROLLER_LEASE[**控制器选主**<br/>• **kube-controller-manager**<br/>• **kube-scheduler**<br/>• **cloud-controller-manager**<br/>• **自定义控制器**<br/>• 确保单活实例运行]
             
@@ -77,7 +75,6 @@ graph TB
         end
         
         subgraph "**Node Heartbeat Lease**"  
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             KUBELET_LEASE[**Kubelet心跳**<br/>• **节点健康状态上报**<br/>• **轻量级心跳机制**<br/>• **替代频繁Node Status更新**<br/>• **减少etcd压力**<br/>• **快速故障检测**]
             
@@ -85,7 +82,6 @@ graph TB
         end
         
         subgraph "**Custom Coordination Lease**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             CUSTOM_APPS[**应用级协调**<br/>• **数据库主从选举**<br/>• **缓存集群协调**<br/>• **任务调度协调**<br/>• **分布式锁实现**<br/>• **状态同步协调**]
             
@@ -93,7 +89,6 @@ graph TB
         end
         
         subgraph "**System Component Lease**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             API_SERVER[**API Server协调**<br/>• **多实例负载均衡**<br/>• **请求分发协调**<br/>• **存储后端协调**<br/>• **证书轮换协调**<br/>• **配置同步**]
             
@@ -101,7 +96,6 @@ graph TB
         end
         
         subgraph "**Lease 特性对比**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             LEASE_FEATURES[**特性对比**<br/>**轻量级**: 相比ConfigMap/Endpoints更轻量<br/>**高效**: 减少API Server和etcd负载<br/>**精确**: 微秒级时间戳支持<br/>**可扩展**: 支持大规模集群<br/>**兼容**: 向后兼容老版本机制]
         end
@@ -132,10 +126,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**Kubernetes Lease 整体架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**应用层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CONTROLLERS[**控制器组件**<br/>• kube-controller-manager<br/>• kube-scheduler<br/>• cloud-controller-manager<br/>• custom-controllers]
             
@@ -145,7 +137,6 @@ graph TB
         end
         
         subgraph "**Client-Go Library层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             LEADER_ELECTION[**LeaderElection库**<br/>• 选主算法实现<br/>• 租约获取和续约<br/>• 状态转换处理<br/>• 回调函数机制]
             
@@ -153,7 +144,6 @@ graph TB
         end
         
         subgraph "**API Server层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             COORDINATION_API[**Coordination API**<br/>• Lease CRUD操作<br/>• 请求验证<br/>• 权限检查<br/>• 并发控制]
             
@@ -161,7 +151,6 @@ graph TB
         end
         
         subgraph "**存储层**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             ETCD_STORAGE[**etcd存储**<br/>• Lease对象持久化<br/>• 原子操作支持<br/>• Watch机制<br/>• 一致性保证]
             
@@ -169,7 +158,6 @@ graph TB
         end
         
         subgraph "**监控观测层**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             METRICS[**指标收集**<br/>• 租约续约成功率<br/>• 选主切换频率<br/>• 心跳延迟<br/>• 故障检测时间]
             
@@ -177,7 +165,6 @@ graph TB
         end
         
         subgraph "**Node Lifecycle层**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             NODE_CONTROLLER[**Node生命周期控制器**<br/>• 节点健康状态判断<br/>• 基于Lease的快速检测<br/>• Pod驱逐决策<br/>• 集群容量管理]
             

@@ -36,10 +36,8 @@ Admission Webhook 是 Kubernetes 准入控制器系统的重要扩展机制，�
 ```mermaid
 graph TB
     subgraph "**Kubernetes Admission Webhook 类型**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**Mutating Admission Webhook**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             MUTATING[**MutatingAdmissionWebhook**<br/>• **功能**: 修改请求对象<br/>• **执行时机**: 资源对象变更前<br/>• **典型用途**: 注入sidecar、设置默认值<br/>• **返回**: AdmissionReview + JSONPatch]
             
@@ -47,27 +45,23 @@ graph TB
         end
         
         subgraph "**Validating Admission Webhook**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             VALIDATING[**ValidatingAdmissionWebhook**<br/>• **功能**: 验证请求对象<br/>• **执行时机**: 资源对象变更前<br/>• **典型用途**: 策略检查、合规验证<br/>• **返回**: AdmissionReview + Allow/Deny]
             
             VALIDATING_EXAMPLES[**应用示例**<br/>• **OPA**: 开放策略代理验证<br/>• **Security策略**: 安全规则检查<br/>• **资源配额**: 资源限制验证<br/>• **镜像策略**: 镜像安全扫描]
         end
         
-        subgtml:graph "**执行顺序**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
+        subgraph ExecutionOrder ["**执行顺序**"]
             
             EXECUTION_ORDER[**Webhook执行顺序**<br/>1. **内置Mutating插件**<br/>2. **MutatingAdmissionWebhook**<br/>3. **Object Schema验证**<br/>4. **内置Validating插件**<br/>5. **ValidatingAdmissionWebhook**]
         end
         
         subgraph "**配置资源**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             CONFIGURATIONS[**Webhook配置**<br/>• **MutatingWebhookConfiguration**<br/>• **ValidatingWebhookConfiguration**<br/>• **规则匹配配置**<br/>• **客户端连接配置**<br/>• **故障处理策略**]
         end
         
         subgraph "**通信协议**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             PROTOCOL[**AdmissionReview协议**<br/>• **Request**: 包含资源信息<br/>• **Response**: 包含决策结果<br/>• **版本兼容**: v1/v1beta1<br/>• **序列化**: JSON格式<br/>• **传输**: HTTPS强制要求]
         end
@@ -151,10 +145,8 @@ type MutatingWebhook struct {
 ```mermaid
 graph TB
     subgraph "**Kubernetes Admission Webhook 整体架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**客户端请求层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             KUBECTL[**kubectl**<br/>• 用户命令行操作<br/>• 资源YAML提交<br/>• 配置管理<br/>• API调用发起]
             
@@ -162,7 +154,6 @@ graph TB
         end
         
         subgraph "**API Server 准入控制**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             API_SERVER[**API Server**<br/>• 接收API请求<br/>• 认证授权检查<br/>• 准入控制链执行<br/>• 资源持久化]
             
@@ -170,7 +161,6 @@ graph TB
         end
         
         subgraph "**Webhook 插件层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             MUTATING_PLUGIN[**Mutating插件**<br/>• 配置管理器<br/>• 规则匹配引擎<br/>• HTTP客户端<br/>• 响应处理器]
             
@@ -178,7 +168,6 @@ graph TB
         end
         
         subgraph "**外部Webhook服务**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             WEBHOOK_SERVICE[**Webhook服务端**<br/>• HTTPS服务器<br/>• AdmissionReview处理<br/>• 业务逻辑实现<br/>• 证书管理]
             
@@ -186,7 +175,6 @@ graph TB
         end
         
         subgraph "**配置管理**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             WEBHOOK_CONFIG[**Webhook配置**<br/>• MutatingWebhookConfiguration<br/>• ValidatingWebhookConfiguration<br/>• 规则定义<br/>• 客户端配置]
             
@@ -194,7 +182,6 @@ graph TB
         end
         
         subgraph "**监控与观测**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             MONITORING[**监控指标**<br/>• 请求延迟<br/>• 成功率<br/>• 错误统计<br/>• 性能指标]
             
@@ -993,10 +980,8 @@ spec:
 ```mermaid
 graph TB
     subgraph "**Webhook 典型应用场景**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**安全与合规**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             SECURITY[**安全策略实施**<br/>• **镜像安全扫描**: 阻止漏洞镜像<br/>• **特权容器检查**: 禁用特权模式<br/>• **资源限制验证**: 强制资源配额<br/>• **网络策略检查**: 验证网络访问规则]
             
@@ -1004,7 +989,6 @@ graph TB
         end
         
         subgraph "**资源管理**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             RESOURCE_MGMT[**资源配置管理**<br/>• **默认值注入**: 自动设置默认配置<br/>• **资源配额控制**: 防止资源滥用<br/>• **标签标准化**: 统一标签规范<br/>• **命名规范**: 强制命名约定]
             
@@ -1012,7 +996,6 @@ graph TB
         end
         
         subgraph "**服务网格集成**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             SERVICE_MESH[**Sidecar注入**<br/>• **Istio**: Envoy代理自动注入<br/>• **Linkerd**: 服务网格集成<br/>• **Consul Connect**: 服务连接<br/>• **配置管理**: 网格配置自动化]
             
@@ -1020,7 +1003,6 @@ graph TB
         end
         
         subgraph "**DevOps自动化**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             CICD_INTEGRATION[**CI/CD集成**<br/>• **部署验证**: 发布前检查<br/>• **版本管理**: 版本标签管理<br/>• **回滚保护**: 防止危险回滚<br/>• **环境隔离**: 环境配置验证]
             
@@ -1028,7 +1010,6 @@ graph TB
         end
         
         subgraph "**多租户管理**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             MULTI_TENANT[**租户隔离**<br/>• **资源隔离**: 命名空间资源分离<br/>• **网络隔离**: 租户网络隔离<br/>• **数据隔离**: 数据访问控制<br/>• **权限管理**: 细粒度权限控制]
             

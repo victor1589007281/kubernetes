@@ -678,23 +678,19 @@ func (pl *VolumeBinding) PreBind(ctx context.Context, cs *framework.CycleState, 
 ```mermaid
 graph TB
     subgraph "**Volume Manager 架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**期望状态管理**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             DSW_POPULATOR[**DesiredStateOfWorld Populator**<br/>• 解析 Pod 规格<br/>• 填充期望状态<br/>• 处理卷引用]
             DSW[**DesiredStateOfWorld**<br/>• 维护期望的卷状态<br/>• 卷到Pod映射<br/>• 挂载路径管理]
         end
         
         subgraph "**实际状态管理**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             ASW[**ActualStateOfWorld**<br/>• 跟踪实际卷状态<br/>• 挂载点信息<br/>• 设备路径管理]
         end
         
         subgraph "**协调器**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             RECONCILER[**Reconciler**<br/>• 状态协调循环<br/>• 触发挂载/卸载操作<br/>• 错误重试机制]
             OP_EXECUTOR[**Operation Executor**<br/>• 异步操作执行<br/>• 卷插件调用<br/>• 操作序列化]
@@ -914,10 +910,8 @@ func (m *manager) AddPod(pod *v1.Pod) {
 ```mermaid
 graph TB
     subgraph "**探针执行架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**探针管理器**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             PROBE_MGR[**Probe Manager**<br/>• 管理所有探针 Worker<br/>• 协调探针生命周期<br/>• 处理探针结果]
             
@@ -925,7 +919,6 @@ graph TB
         end
         
         subgraph "**探针 Worker**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             STARTUP_WORKER[**Startup Probe Worker**<br/>• 启动时探测<br/>• 阻塞其他探针<br/>• 失败时重启容器]
             
@@ -935,7 +928,6 @@ graph TB
         end
         
         subgraph "**探针执行器**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             HTTP_PROBER[**HTTP Prober**<br/>• HTTP/HTTPS 请求<br/>• 状态码检查<br/>• 超时控制]
             
@@ -945,7 +937,6 @@ graph TB
         end
         
         subgraph "**状态更新**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             STATUS_MGR[**Status Manager**<br/>• Pod 状态聚合<br/>• 条件更新<br/>• API 同步]
             

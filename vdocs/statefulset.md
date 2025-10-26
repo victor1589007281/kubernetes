@@ -46,15 +46,12 @@ StatefulSet 是 Kubernetes 中用于管理有状态应用的工作负载控制�
 ```mermaid
 graph TB
     subgraph "**StatefulSet 核心架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**控制平面**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             API[**API Server**<br/>• StatefulSet 资源管理<br/>• Pod 状态协调<br/>• PVC 生命周期管理]
             
             subgraph "**Controller Manager**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 STS_CTRL[**StatefulSet Controller**<br/>• 有序创建/删除逻辑<br/>• Pod 标识管理<br/>• 存储绑定协调]
                 
@@ -65,17 +62,14 @@ graph TB
         end
         
         subgraph "**数据平面**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             HEADLESS_SVC[**Headless Service**<br/>• 稳定 DNS 解析<br/>• Pod 网络标识<br/>• 服务发现]
             
             subgraph "**工作节点**"
-                style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
                 
                 KUBELET[**Kubelet**<br/>• Pod 生命周期管理<br/>• 卷挂载管理<br/>• 容器运行时交互]
                 
                 subgraph "**Pod 集合**"
-                    style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
                     
                     POD0[**app-0**<br/>• 序号: 0<br/>• DNS: app-0.service<br/>• PVC: data-app-0]
                     POD1[**app-1**<br/>• 序号: 1<br/>• DNS: app-1.service<br/>• PVC: data-app-1]
@@ -83,7 +77,6 @@ graph TB
                 end
                 
                 subgraph "**存储层**"
-                    style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
                     
                     PVC0[**PVC: data-app-0**]
                     PVC1[**PVC: data-app-1**]
@@ -128,10 +121,8 @@ graph TB
 ```mermaid
 graph TB
     subgraph "**StatefulSet 系统层次架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**用户接口层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             KUBECTL[**kubectl**<br/>• StatefulSet 创建<br/>• 扩缩容操作<br/>• 状态查询]
             
@@ -139,12 +130,10 @@ graph TB
         end
         
         subgraph "**控制器层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             STS_CONTROLLER[**StatefulSet Controller**<br/>• 期望状态计算<br/>• Pod 有序管理<br/>• 存储协调]
             
             subgraph "**核心组件**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 POD_CONTROL[**Pod Control**<br/>• Pod 创建/删除<br/>• 标识管理<br/>• 状态同步]
                 
@@ -155,7 +144,6 @@ graph TB
         end
         
         subgraph "**调度与存储层**"
-            style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
             
             SCHEDULER[**Scheduler**<br/>• Pod 调度决策<br/>• 亲和性处理<br/>• 资源分配]
             
@@ -163,7 +151,6 @@ graph TB
         end
         
         subgraph "**执行层**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             NODE_AGENT[**Node Agent**<br/>• Kubelet<br/>• Container Runtime<br/>• Volume Plugin]
             
@@ -198,14 +185,14 @@ graph TB
 // UpdateStatefulSet 执行 StatefulSet 的核心逻辑循环
 func (ssc *defaultStatefulSetControl) UpdateStatefulSet(ctx context.Context, set *apps.StatefulSet, pods []*v1.Pod) (*apps.StatefulSetStatus, error) {
     // 深拷贝 StatefulSet，避免在创建新修订版本时发生变更错误
-    set = set.DeepCopy()
+    set = set.DeepCopy- 
 
     // 列出所有修订版本并排序
-    revisions, err := ssc.ListRevisions(set)
+    revisions, err := ssc.ListRevisions- set
     if err != nil {
         return nil, err
     }
-    history.SortControllerRevisions(revisions)
+    history.SortControllerRevisions- revisions
 
     // 执行更新操作
     currentRevision, updateRevision, status, err := ssc.performUpdate(ctx, set, pods, revisions)
@@ -241,7 +228,7 @@ func (ssc *defaultStatefulSetControl) processReplica(
             return true, err
         }
         // 创建新版本的 Pod
-        replicaOrd := i + getStartOrdinal(set)
+        replicaOrd := i + getStartOrdinal- set
         replicas[i] = newVersionedStatefulSetPod(
             currentSet, updateSet,
             currentRevision.Name, updateRevision.Name, replicaOrd)
@@ -300,9 +287,7 @@ stateDiagram-v2
     **清理期望** --> [*] : 清理完成
     **重新入队** --> [*] : 稍后重试
     
-    note right of **有序处理** : **单调模式:**<br/>**• 一次只处理一个Pod**<br/>**• 等待Pod就绪后继续**<br/>**• 确保有序性**
     
-    note right of **等待就绪** : **就绪条件:**<br/>**• Pod.Status.Phase = Running**<br/>**• 所有健康检查通过**<br/>**• 不处于终止状态**
 ```
 
 ---
@@ -414,7 +399,7 @@ func (spc *StatefulPodControl) CreateStatefulPod(ctx context.Context, set *apps.
     
     // 如果成功创建了 PVC，尝试创建 Pod
     err := spc.objectMgr.CreatePod(ctx, pod)
-    if apierrors.IsAlreadyExists(err) {
+    if apierrors.IsAlreadyExists- err {
         return err
     }
     
@@ -445,10 +430,8 @@ func getPersistentVolumeClaimName(set *apps.StatefulSet, claim *v1.PersistentVol
 ```mermaid
 graph TB
     subgraph "**StatefulSet 存储管理架构**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**StatefulSet 层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             STS[**StatefulSet**<br/>**web**<br/>• replicas: 3<br/>• serviceName: web-svc]
             
@@ -456,7 +439,6 @@ graph TB
         end
         
         subgraph "**Pod 层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             POD0[**Pod: web-0**<br/>• hostname: web-0<br/>• subdomain: web-svc]
             POD1[**Pod: web-1**<br/>• hostname: web-1<br/>• subdomain: web-svc]
@@ -464,7 +446,6 @@ graph TB
         end
         
         subgraph "**PVC 层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             PVC0[**PVC: data-web-0**<br/>• size: 10Gi<br/>• storageClass: fast<br/>• bound: pv-001]
             PVC1[**PVC: data-web-1**<br/>• size: 10Gi<br/>• storageClass: fast<br/>• bound: pv-002]
@@ -472,7 +453,6 @@ graph TB
         end
         
         subgraph "**PV 层**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             PV0[**PV: pv-001**<br/>• capacity: 10Gi<br/>• accessModes: RWO<br/>• path: /data/vol001]
             PV1[**PV: pv-002**<br/>• capacity: 10Gi<br/>• accessModes: RWO<br/>• path: /data/vol002]
@@ -480,7 +460,6 @@ graph TB
         end
         
         subgraph "**存储后端**"
-            style subgraph fill:#f5f5dc,stroke:#daa520,stroke-width:2px
             
             STORAGE[**存储系统**<br/>• 本地存储<br/>• 网络存储<br/>• 云存储]
         end
@@ -525,7 +504,7 @@ func initIdentity(set *apps.StatefulSet, pod *v1.Pod) {
 
 // updateIdentity 更新 Pod 的名称、主机名和子域名
 func updateIdentity(set *apps.StatefulSet, pod *v1.Pod) {
-    ordinal := getOrdinal(pod)
+    ordinal := getOrdinal- pod
     pod.Name = getPodName(set, ordinal)
     pod.Namespace = set.Namespace
     if pod.Labels == nil {
@@ -540,16 +519,13 @@ func updateIdentity(set *apps.StatefulSet, pod *v1.Pod) {
 ```mermaid
 graph TB
     subgraph "**StatefulSet DNS 解析机制**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**DNS 查询层**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CLIENT[**客户端应用**<br/>• 查询: web-0.web-svc<br/>• 查询: web-svc<br/>• 查询: web-1.web-svc.default]
         end
         
         subgraph "**DNS 服务层**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             COREDNS[**CoreDNS**<br/>• A记录解析<br/>• SRV记录管理<br/>• 服务发现]
             
@@ -557,12 +533,10 @@ graph TB
         end
         
         subgraph "**服务层**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             HEADLESS_SVC[**Headless Service**<br/>**web-svc**<br/>• clusterIP: None<br/>• selector: app=web<br/>• ports: 80]
             
             subgraph "**DNS 记录**"
-                style subgraph fill:#f0f8ff,stroke:#4169e1,stroke-width:2px
                 
                 DNS_A[**A 记录**<br/>• web-0.web-svc → 10.1.1.10<br/>• web-1.web-svc → 10.1.1.11<br/>• web-2.web-svc → 10.1.1.12]
                 
@@ -571,7 +545,6 @@ graph TB
         end
         
         subgraph "**Pod 层**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             POD0[**Pod: web-0**<br/>• IP: 10.1.1.10<br/>• hostname: web-0<br/>• subdomain: web-svc<br/>• FQDN: web-0.web-svc.default.svc.cluster.local]
             
@@ -644,7 +617,7 @@ sequenceDiagram
     Note right of CTRL: **• ControllerRevision-v2**<br/>**• 包含新配置**<br/>**• 更新标识**
     
     CTRL->>CTRL: **4. 计算分区策略**
-    Note right of CTRL: **• Partition: 0 (默认)**<br/>**• 从最大序号开始更新**<br/>**• 更新范围: [partition, replicas-1]**
+    Note right of CTRL: **• Partition: 0 默认**<br/>**• 从最大序号开始更新**<br/>**• 更新范围: [partition, replicas-1]**
     
     Note over CTRL: **开始逆序更新（从 web-2 开始）**
     
@@ -681,24 +654,20 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph "**分区更新策略示例（Partition=1）**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**更新范围 [1, 2]**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
-            POD2_NEW[**web-2 (新版本)**<br/>• Revision: v2<br/>• Image: app:2.0<br/>• 状态: 更新完成]
+            POD2_NEW[**web-2 新版本**<br/>• Revision: v2<br/>• Image: app:2.0<br/>• 状态: 更新完成]
             
-            POD1_NEW[**web-1 (新版本)**<br/>• Revision: v2<br/>• Image: app:2.0<br/>• 状态: 更新完成]
+            POD1_NEW[**web-1 新版本**<br/>• Revision: v2<br/>• Image: app:2.0<br/>• 状态: 更新完成]
         end
         
         subgraph "**保持范围 [0, 0]**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
-            POD0_OLD[**web-0 (旧版本)**<br/>• Revision: v1<br/>• Image: app:1.0<br/>• 状态: 保持不变]
+            POD0_OLD[**web-0 旧版本**<br/>• Revision: v1<br/>• Image: app:1.0<br/>• 状态: 保持不变]
         end
         
         subgraph "**配置信息**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             CONFIG[**更新策略**<br/>• Type: RollingUpdate<br/>• Partition: 1<br/>• MaxUnavailable: 1]
         end
@@ -740,21 +709,17 @@ const (
 ```mermaid
 graph TB
     subgraph "**Pod 管理策略对比**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**OrderedReady 策略**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             OR_TITLE[**有序就绪管理**<br/>**（默认策略）**]
             
             subgraph "**扩容过程**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 OR_SCALE_UP[**扩容：0 → 3**<br/>1. 创建 web-0<br/>2. 等待 web-0 就绪<br/>3. 创建 web-1<br/>4. 等待 web-1 就绪<br/>5. 创建 web-2<br/>6. 等待 web-2 就绪]
             end
             
             subgraph "**缩容过程**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
                 OR_SCALE_DOWN[**缩容：3 → 1**<br/>1. 删除 web-2<br/>2. 等待 web-2 终止<br/>3. 删除 web-1<br/>4. 等待 web-1 终止]
             end
@@ -763,18 +728,15 @@ graph TB
         end
         
         subgraph "**Parallel 策略**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             PAR_TITLE[**并行管理**<br/>**（高性能策略）**]
             
             subgraph "**扩容过程**"
-                style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
                 
                 PAR_SCALE_UP[**扩容：0 → 3**<br/>1. 同时创建 web-0、web-1、web-2<br/>2. 并行启动<br/>3. 不等待就绪状态]
             end
             
             subgraph "**缩容过程**"
-                style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
                 
                 PAR_SCALE_DOWN[**缩容：3 → 1**<br/>1. 同时删除 web-2、web-1<br/>2. 并行终止<br/>3. 不等待终止完成]
             end
@@ -829,16 +791,13 @@ const (
 ```mermaid
 graph TB
     subgraph "**PVC 自动删除策略**"
-        style subgraph fill:#f9f9f9,stroke:#333,stroke-width:2px
         
         subgraph "**策略配置**"
-            style subgraph fill:#e6f3ff,stroke:#0066cc,stroke-width:2px
             
             POLICY[**PVC 保留策略**<br/>• **WhenDeleted**: Retain/Delete<br/>• **WhenScaled**: Retain/Delete<br/>• 默认值: Retain]
         end
         
         subgraph "**WhenDeleted 策略**"
-            style subgraph fill:#e6ffe6,stroke:#009900,stroke-width:2px
             
             DELETE_RETAIN[**Retain 策略**<br/>• StatefulSet 删除<br/>• PVC 保留<br/>• 数据持久化<br/>• 手动清理]
             
@@ -846,7 +805,6 @@ graph TB
         end
         
         subgraph "**WhenScaled 策略**"
-            style subgraph fill:#fff2e6,stroke:#cc6600,stroke-width:2px
             
             SCALE_RETAIN[**Retain 策略**<br/>• StatefulSet 缩容<br/>• 多余 PVC 保留<br/>• 扩容时重用<br/>• 数据保护]
             
@@ -854,7 +812,6 @@ graph TB
         end
         
         subgraph "**场景示例**"
-            style subgraph fill:#ffe6f2,stroke:#cc0066,stroke-width:2px
             
             SCENARIO1[**场景一：数据库**<br/>• WhenDeleted: Retain<br/>• WhenScaled: Retain<br/>• 数据安全优先]
             

@@ -135,6 +135,201 @@ func (r *remoteRuntimeService) CreateContainer(ctx context.Context, podSandBoxID
 
 ## CRI 整体架构图
 
+### 3.1 CRI 功能架构图
+
+```mermaid
+graph TB
+    subgraph Kubelet ["**Kubelet**"]
+        subgraph PodLifecycle ["**Pod 生命周期管理**"]
+            PodWorkers[**Pod Workers**<br/>并发处理 Pod]
+            SyncPod[**syncPod**<br/>协调 Pod 状态]
+            StatusManager[**Status Manager**<br/>状态同步]
+        end
+        
+        subgraph RuntimeManagement ["**运行时管理层**"]
+            GenericRuntime[**Generic Runtime Manager**<br/>通用运行时接口]
+            ImageManager[**Image Manager**<br/>镜像管理]
+            VolumeManager[**Volume Manager**<br/>卷管理]
+            ProbeManager[**Probe Manager**<br/>健康检查]
+        end
+        
+        subgraph CRIClient ["**CRI 客户端**"]
+            RuntimeClient[**Runtime Service Client**<br/>gRPC 客户端]
+            ImageClient[**Image Service Client**<br/>gRPC 客户端]
+        end
+    end
+    
+    subgraph CRIRuntime ["**CRI Runtime**"]
+        subgraph RuntimeServer ["**Runtime Server**"]
+            gRPCServer[**gRPC Server**<br/>Unix Socket 监听]
+            RuntimeService[**Runtime Service**<br/>容器生命周期]
+            ImageService[**Image Service**<br/>镜像管理]
+        end
+        
+        subgraph SandboxMgmt ["**Sandbox 管理**"]
+            RunPodSandbox[**RunPodSandbox**<br/>创建 Pod 网络命名空间]
+            StopPodSandbox[**StopPodSandbox**<br/>停止 Pod Sandbox]
+            RemovePodSandbox[**RemovePodSandbox**<br/>删除 Pod Sandbox]
+        end
+        
+        subgraph ContainerMgmt ["**Container 管理**"]
+            CreateContainer[**CreateContainer**<br/>创建容器]
+            StartContainer[**StartContainer**<br/>启动容器]
+            StopContainer[**StopContainer**<br/>停止容器]
+            RemoveContainer[**RemoveContainer**<br/>删除容器]
+            ExecSync[**ExecSync**<br/>同步执行命令]
+        end
+        
+        subgraph ImageMgmt ["**Image 管理**"]
+            PullImage[**PullImage**<br/>拉取镜像]
+            ListImages[**ListImages**<br/>列出镜像]
+            RemoveImage[**RemoveImage**<br/>删除镜像]
+            ImageStatus[**ImageStatus**<br/>镜像状态]
+        end
+        
+        subgraph ContainerEngine ["**容器引擎**"]
+            Containerd[**containerd**<br/>容器运行时]
+            CRIO[**CRI-O**<br/>轻量级运行时]
+            DockerShim[**dockershim**<br/>Docker 适配器（已废弃）]
+        end
+    end
+    
+    PodWorkers --> SyncPod
+    SyncPod --> GenericRuntime
+    GenericRuntime --> RuntimeClient
+    GenericRuntime --> ImageClient
+    SyncPod --> VolumeManager
+    SyncPod --> StatusManager
+    
+    RuntimeClient -.gRPC<br/>Unix Socket.-> gRPCServer
+    ImageClient -.gRPC<br/>Unix Socket.-> gRPCServer
+    
+    gRPCServer --> RuntimeService
+    gRPCServer --> ImageService
+    
+    RuntimeService --> RunPodSandbox
+    RuntimeService --> StopPodSandbox
+    RuntimeService --> RemovePodSandbox
+    RuntimeService --> CreateContainer
+    RuntimeService --> StartContainer
+    RuntimeService --> StopContainer
+    RuntimeService --> RemoveContainer
+    RuntimeService --> ExecSync
+    
+    ImageService --> PullImage
+    ImageService --> ListImages
+    ImageService --> RemoveImage
+    ImageService --> ImageStatus
+    
+    RunPodSandbox --> Containerd
+    CreateContainer --> Containerd
+    StartContainer --> Containerd
+    PullImage --> Containerd
+    
+    RunPodSandbox --> CRIO
+    CreateContainer --> CRIO
+    
+    ProbeManager -.健康检查.-> ExecSync
+```
+
+### 3.2 CRI 完整交互时序图
+
+```mermaid
+sequenceDiagram
+    participant APIServer as **API Server**
+    participant Kubelet as **Kubelet**
+    participant RuntimeMgr as **Runtime Manager**
+    participant CRIClient as **CRI Client**
+    participant CRIRuntime as **CRI Runtime**
+    participant Containerd as **containerd**
+    participant CNI as **CNI Plugin**
+    participant Registry as **Image Registry**
+    
+    Note over APIServer,Registry: **阶段 1: Pod 创建通知**
+    
+    APIServer->>Kubelet: **1. Pod 创建/更新事件**
+    Kubelet->>Kubelet: **2. Pod Worker 处理**
+    Kubelet->>RuntimeMgr: **3. SyncPod()**
+    
+    Note over APIServer,Registry: **阶段 2: 镜像准备**
+    
+    RuntimeMgr->>CRIClient: **4. ImageStatus()**<br/>检查镜像是否存在
+    CRIClient->>CRIRuntime: **5. gRPC: ImageStatus**
+    CRIRuntime->>Containerd: **6. 查询镜像**
+    
+    alt 镜像不存在
+        Containerd->>CRIRuntime: **7. 镜像未找到**
+        CRIRuntime->>CRIClient: **8. 返回镜像不存在**
+        CRIClient->>RuntimeMgr: **9. 需要拉取镜像**
+        
+        RuntimeMgr->>CRIClient: **10. PullImage()**
+        CRIClient->>CRIRuntime: **11. gRPC: PullImage**
+        CRIRuntime->>Containerd: **12. 拉取镜像**
+        Containerd->>Registry: **13. 下载镜像层**
+        Registry->>Containerd: **14. 返回镜像数据**
+        Containerd->>CRIRuntime: **15. 镜像就绪**
+        CRIRuntime->>CRIClient: **16. 拉取完成**
+    end
+    
+    Note over APIServer,Registry: **阶段 3: 创建 Pod Sandbox**
+    
+    RuntimeMgr->>CRIClient: **17. RunPodSandbox()**<br/>PodSandboxConfig
+    CRIClient->>CRIRuntime: **18. gRPC: RunPodSandbox**
+    
+    CRIRuntime->>Containerd: **19. 创建 Sandbox 容器（Pause）**
+    Containerd->>Containerd: **20. 创建网络命名空间**
+    Containerd->>CRIRuntime: **21. 返回 Sandbox ID**
+    
+    CRIRuntime->>CNI: **22. CNI ADD 命令**<br/>设置 Pod 网络
+    CNI->>CNI: **23. 创建 veth pair**
+    CNI->>CNI: **24. 分配 Pod IP**
+    CNI->>CNI: **25. 配置路由规则**
+    CNI->>CRIRuntime: **26. 返回网络配置**
+    
+    CRIRuntime->>CRIClient: **27. 返回 Sandbox ID**
+    CRIClient->>RuntimeMgr: **28. Sandbox 就绪**
+    
+    Note over APIServer,Registry: **阶段 4: 创建业务容器**
+    
+    RuntimeMgr->>CRIClient: **29. CreateContainer()**<br/>ContainerConfig + Sandbox ID
+    CRIClient->>CRIRuntime: **30. gRPC: CreateContainer**
+    
+    CRIRuntime->>Containerd: **31. 创建容器**<br/>• 挂载卷<br/>• 配置环境变量<br/>• 设置资源限制
+    Containerd->>Containerd: **32. 创建容器文件系统**
+    Containerd->>CRIRuntime: **33. 返回 Container ID**
+    CRIRuntime->>CRIClient: **34. 返回 Container ID**
+    
+    RuntimeMgr->>CRIClient: **35. StartContainer()**<br/>Container ID
+    CRIClient->>CRIRuntime: **36. gRPC: StartContainer**
+    CRIRuntime->>Containerd: **37. 启动容器进程**
+    Containerd->>Containerd: **38. 加入 Sandbox 网络命名空间**
+    Containerd->>Containerd: **39. 执行容器入口点**
+    Containerd->>CRIRuntime: **40. 容器运行中**
+    CRIRuntime->>CRIClient: **41. 启动成功**
+    
+    Note over APIServer,Registry: **阶段 5: 状态同步**
+    
+    RuntimeMgr->>CRIClient: **42. PodSandboxStatus()**
+    CRIClient->>CRIRuntime: **43. gRPC: PodSandboxStatus**
+    CRIRuntime->>Containerd: **44. 查询 Sandbox 状态**
+    Containerd->>CRIRuntime: **45. 返回状态**
+    CRIRuntime->>CRIClient: **46. 返回 Sandbox 状态**
+    
+    RuntimeMgr->>Kubelet: **47. 更新 Pod 状态**
+    Kubelet->>APIServer: **48. 更新 Pod Status**<br/>Pod IP, Phase=Running
+    
+    Note over APIServer,Registry: **阶段 6: 健康检查**
+    
+    loop 定期健康检查
+        Kubelet->>CRIClient: **49. ExecSync(liveness probe)**
+        CRIClient->>CRIRuntime: **50. gRPC: ExecSync**
+        CRIRuntime->>Containerd: **51. 执行探针命令**
+        Containerd->>CRIRuntime: **52. 返回执行结果**
+        CRIRuntime->>CRIClient: **53. 返回探针结果**
+        CRIClient->>Kubelet: **54. 健康检查通过/失败**
+    end
+```
+
 上方的架构图展示了 CRI 在 Kubernetes 集群中的完整架构，包括：
 
 1. **Kubelet 组件**：Runtime Manager、Image Manager、Pod Workers 等
