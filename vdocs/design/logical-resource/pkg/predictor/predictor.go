@@ -15,6 +15,16 @@ limitations under the License.
 */
 
 // Package predictor provides memory usage prediction capabilities.
+//
+// This package implements multiple time series prediction algorithms:
+//   - Holt-Winters (Triple Exponential Smoothing)
+//   - ARIMA (AutoRegressive Integrated Moving Average)
+//   - SARIMA (Seasonal ARIMA)
+//   - Prophet-like (Trend + Seasonality decomposition)
+//   - LSTM/GRU (Simplified neural network approach)
+//
+// The EnsemblePredictor automatically evaluates all algorithms and selects
+// the best one based on cross-validation MAPE (Mean Absolute Percentage Error).
 package predictor
 
 import (
@@ -43,6 +53,20 @@ type Predictor interface {
 
 	// GetAccuracy returns the prediction accuracy based on historical predictions.
 	GetAccuracy() float64
+}
+
+// ExtendedPredictor extends Predictor with model evaluation capabilities.
+type ExtendedPredictor interface {
+	Predictor
+
+	// EvaluateModels evaluates all available algorithms and returns their performance.
+	EvaluateModels() ([]ModelResult, error)
+
+	// GetSelectedAlgorithm returns the currently selected best algorithm.
+	GetSelectedAlgorithm() AlgorithmType
+
+	// GetLastEvaluation returns the results of the last model evaluation.
+	GetLastEvaluation() []ModelResult
 }
 
 // MemoryPredictor implements the Predictor interface using a hybrid model.
