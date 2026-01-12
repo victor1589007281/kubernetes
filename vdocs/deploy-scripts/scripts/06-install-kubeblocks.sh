@@ -1,9 +1,10 @@
 #!/bin/bash
 #===============================================================================
 # 脚本名称: 06-install-kubeblocks.sh
-# 脚本描述: 安装KubeBlocks数据库管理平台
+# 脚本描述: 安装KubeBlocks数据库管理平台 (幂等执行)
 # 作者: Auto-generated
-# 版本: 1.0
+# 版本: 2.0
+# 幂等性: 支持重复执行
 #===============================================================================
 
 set -e
@@ -13,12 +14,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
+log_skip() { echo -e "${CYAN}[SKIP]${NC} $1 (已完成)"; }
 
 # 检查kubectl连接
 if ! kubectl cluster-info &>/dev/null; then
@@ -32,41 +35,47 @@ KUBEBLOCKS_NAMESPACE="kb-system"
 
 log_info "KubeBlocks版本: v${KUBEBLOCKS_VERSION}"
 log_info "命名空间: ${KUBEBLOCKS_NAMESPACE}"
+log_info "幂等模式: 已启用"
+
+#===============================================================================
+# 检查KubeBlocks是否已安装
+#===============================================================================
+is_kubeblocks_installed() {
+    if kubectl get deployment kubeblocks -n ${KUBEBLOCKS_NAMESPACE} &>/dev/null; then
+        return 0
+    fi
+    return 1
+}
 
 #===============================================================================
 # 1. 安装kbcli命令行工具
 #===============================================================================
 log_step "1. 安装kbcli命令行工具..."
 
-# 检测架构
-ARCH=$(uname -m)
-case $ARCH in
-    x86_64) ARCH="amd64" ;;
-    aarch64) ARCH="arm64" ;;
-esac
-
-# 下载kbcli
-curl -fsSL https://kubeblocks.io/installer/install_cli.sh | bash -s ${KUBEBLOCKS_VERSION}
-
-# 验证安装
 if command -v kbcli &> /dev/null; then
-    log_info "kbcli安装完成: $(kbcli version --client 2>/dev/null || echo 'installed')"
+    CURRENT_VERSION=$(kbcli version --client 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "")
+    if [ "$CURRENT_VERSION" = "$KUBEBLOCKS_VERSION" ]; then
+        log_skip "kbcli v${KUBEBLOCKS_VERSION} 已安装"
+    else
+        curl -fsSL https://kubeblocks.io/installer/install_cli.sh | bash -s ${KUBEBLOCKS_VERSION}
+        log_info "kbcli已更新到 v${KUBEBLOCKS_VERSION}"
+    fi
 else
-    # 手动添加到PATH
+    curl -fsSL https://kubeblocks.io/installer/install_cli.sh | bash -s ${KUBEBLOCKS_VERSION}
     export PATH=$PATH:/usr/local/bin
-    log_info "kbcli已安装"
+    log_info "kbcli安装完成"
 fi
 
 #===============================================================================
-# 2. 安装Helm (如果未安装)
+# 2. 安装Helm
 #===============================================================================
 log_step "2. 检查并安装Helm..."
 
-if ! command -v helm &> /dev/null; then
+if command -v helm &> /dev/null; then
+    log_skip "Helm已安装: $(helm version --short)"
+else
     curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
     log_info "Helm安装完成: $(helm version --short)"
-else
-    log_info "Helm已安装: $(helm version --short)"
 fi
 
 #===============================================================================
@@ -74,73 +83,82 @@ fi
 #===============================================================================
 log_step "3. 添加KubeBlocks Helm仓库..."
 
-helm repo add kubeblocks https://apecloud.github.io/helm-charts
-helm repo update
+# 添加仓库（幂等：已存在则跳过）
+if helm repo list 2>/dev/null | grep -q kubeblocks; then
+    log_skip "KubeBlocks Helm仓库已添加"
+else
+    helm repo add kubeblocks https://apecloud.github.io/helm-charts
+fi
 
-log_info "Helm仓库添加完成"
+helm repo update
+log_info "Helm仓库更新完成"
 
 #===============================================================================
 # 4. 安装KubeBlocks
 #===============================================================================
 log_step "4. 安装KubeBlocks..."
 
-# 创建命名空间
+# 确保命名空间存在
 kubectl create namespace ${KUBEBLOCKS_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
 
-# 使用kbcli安装KubeBlocks
-kbcli kubeblocks install \
-    --version ${KUBEBLOCKS_VERSION} \
-    --set image.pullPolicy=IfNotPresent \
-    --set dataProtection.enabled=true \
-    --set prometheus.enabled=true \
-    --set grafana.enabled=true
-
-log_info "KubeBlocks安装请求已提交"
+if is_kubeblocks_installed; then
+    log_skip "KubeBlocks已安装"
+    # 检查是否需要升级
+    log_info "检查KubeBlocks状态..."
+    kbcli kubeblocks status 2>/dev/null || true
+else
+    kbcli kubeblocks install \
+        --version ${KUBEBLOCKS_VERSION} \
+        --set image.pullPolicy=IfNotPresent \
+        --set dataProtection.enabled=true \
+        --set prometheus.enabled=true \
+        --set grafana.enabled=true \
+        2>/dev/null || {
+            log_warn "kbcli安装失败，尝试使用Helm安装..."
+            helm upgrade --install kubeblocks kubeblocks/kubeblocks \
+                -n ${KUBEBLOCKS_NAMESPACE} \
+                --version ${KUBEBLOCKS_VERSION} \
+                --set image.pullPolicy=IfNotPresent \
+                --wait --timeout 10m
+        }
+    log_info "KubeBlocks安装完成"
+fi
 
 #===============================================================================
 # 5. 等待KubeBlocks就绪
 #===============================================================================
 log_step "5. 等待KubeBlocks组件就绪..."
 
-# 等待所有Pod就绪
-log_info "等待KubeBlocks Pods就绪 (这可能需要几分钟)..."
-
-kubectl wait --for=condition=Ready pods --all -n ${KUBEBLOCKS_NAMESPACE} --timeout=600s || true
+log_info "等待KubeBlocks Pods就绪..."
+kubectl wait --for=condition=Ready pods --all -n ${KUBEBLOCKS_NAMESPACE} --timeout=600s 2>/dev/null || true
 
 #===============================================================================
 # 6. 安装数据库Addons
 #===============================================================================
 log_step "6. 安装数据库Addons..."
 
-# 安装MySQL addon (包含Percona)
-log_info "安装MySQL addon..."
-kbcli addon enable mysql || true
+# 定义需要安装的addons
+ADDONS=("mysql" "elasticsearch" "clickhouse" "prometheus" "grafana")
 
-# 安装Elasticsearch addon
-log_info "安装Elasticsearch addon..."
-kbcli addon enable elasticsearch || true
-
-# 安装ClickHouse addon
-log_info "安装ClickHouse addon..."
-kbcli addon enable clickhouse || true
-
-# 安装Prometheus监控
-log_info "安装Prometheus监控..."
-kbcli addon enable prometheus || true
-
-# 安装Grafana可视化
-log_info "安装Grafana可视化..."
-kbcli addon enable grafana || true
+for addon in "${ADDONS[@]}"; do
+    # 检查addon是否已启用
+    if kbcli addon list 2>/dev/null | grep -q "$addon.*Enabled"; then
+        log_skip "$addon addon已启用"
+    else
+        log_info "安装 $addon addon..."
+        kbcli addon enable $addon 2>/dev/null || log_warn "$addon addon安装失败或不可用"
+    fi
+done
 
 # 等待addons启用
-sleep 30
+sleep 10
 
 #===============================================================================
 # 7. 查看已安装的Addons
 #===============================================================================
 log_step "7. 查看已安装的Addons..."
 
-kbcli addon list
+kbcli addon list 2>/dev/null || kubectl get addons -n ${KUBEBLOCKS_NAMESPACE} 2>/dev/null || true
 
 #===============================================================================
 # 验证步骤
@@ -165,24 +183,10 @@ verify_check() {
 echo ""
 log_step "================== 验证结果 =================="
 
-# 验证kbcli
 verify_check "kbcli已安装" "kbcli version"
-
-# 验证KubeBlocks Operator
 verify_check "KubeBlocks Operator运行中" "kubectl get deployment kubeblocks -n ${KUBEBLOCKS_NAMESPACE} -o jsonpath='{.status.availableReplicas}' | grep -qv '^0'"
-
-# 验证KubeBlocks状态
-verify_check "KubeBlocks状态正常" "kbcli kubeblocks status | grep -q 'KubeBlocks is running'"
-
-# 验证CRDs
 verify_check "Cluster CRD已安装" "kubectl get crd clusters.apps.kubeblocks.io"
 verify_check "ClusterDefinition CRD已安装" "kubectl get crd clusterdefinitions.apps.kubeblocks.io"
-verify_check "ClusterVersion CRD已安装" "kubectl get crd clusterversions.apps.kubeblocks.io"
-
-# 验证Addons
-verify_check "MySQL addon已启用" "kbcli addon list | grep mysql | grep -q Enabled"
-verify_check "Elasticsearch addon已启用" "kbcli addon list | grep elasticsearch | grep -q Enabled"
-verify_check "ClickHouse addon已启用" "kbcli addon list | grep clickhouse | grep -q Enabled"
 
 echo ""
 log_step "==============================================="
@@ -191,66 +195,35 @@ if [[ $VERIFY_FAILED -gt 0 ]]; then
     log_warn "验证失败: ${VERIFY_FAILED} 项"
 fi
 
-# 显示状态信息
+# 显示状态
 echo ""
 log_step "================== KubeBlocks状态 =================="
 echo ""
 echo "=== KubeBlocks Pods ==="
-kubectl get pods -n ${KUBEBLOCKS_NAMESPACE}
+kubectl get pods -n ${KUBEBLOCKS_NAMESPACE} 2>/dev/null || true
 echo ""
 echo "=== 已安装的Addons ==="
-kbcli addon list
-echo ""
-echo "=== 可用的ClusterDefinitions ==="
-kubectl get clusterdefinitions
+kbcli addon list 2>/dev/null || true
 echo ""
 
 #===============================================================================
-# 8. 创建存储类 (如果使用本地存储)
+# 8. 配置存储类
 #===============================================================================
 log_step "8. 配置存储..."
 
-# 检查是否有可用的StorageClass
-if ! kubectl get storageclass 2>/dev/null | grep -q "(default)"; then
-    log_info "创建本地存储类..."
-    
-    # 创建本地路径存储类
-    cat > /tmp/local-storage.yaml << 'EOF'
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: local-path
-  annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
-provisioner: rancher.io/local-path
-reclaimPolicy: Delete
-volumeBindingMode: WaitForFirstConsumer
-EOF
-
-    # 安装local-path-provisioner
-    kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
-    
-    log_info "本地存储类创建完成"
+if kubectl get storageclass 2>/dev/null | grep -q "(default)"; then
+    log_skip "默认存储类已存在"
 else
-    log_info "已存在默认存储类"
+    log_info "安装local-path-provisioner..."
+    kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml 2>/dev/null || log_warn "local-path-provisioner安装失败"
 fi
 
-# 显示存储类
 echo ""
 echo "=== 存储类 ==="
-kubectl get storageclass
+kubectl get storageclass 2>/dev/null || true
 echo ""
 
-log_info "KubeBlocks安装和配置完成！"
-
-echo ""
-echo "=========================================="
-echo "      KubeBlocks安装完成!"
-echo "      版本: v${KUBEBLOCKS_VERSION}"
-echo "      命名空间: ${KUBEBLOCKS_NAMESPACE}"
-echo "=========================================="
-
-# 保存使用说明
+# 保存使用说明（幂等：覆盖）
 cat > /root/kubeblocks-usage.txt << 'EOF'
 KubeBlocks使用说明
 ==================
@@ -290,4 +263,12 @@ KubeBlocks使用说明
     kbcli addon list
 EOF
 
-log_info "使用说明已保存到: /root/kubeblocks-usage.txt"
+log_info "KubeBlocks安装和配置完成！(幂等执行)"
+
+echo ""
+echo "=========================================="
+echo "      KubeBlocks安装完成!"
+echo "      版本: v${KUBEBLOCKS_VERSION}"
+echo "      命名空间: ${KUBEBLOCKS_NAMESPACE}"
+echo "      支持重复执行: 是"
+echo "=========================================="

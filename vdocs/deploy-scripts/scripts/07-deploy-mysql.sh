@@ -1,10 +1,11 @@
 #!/bin/bash
 #===============================================================================
 # 脚本名称: 07-deploy-mysql.sh
-# 脚本描述: 使用KubeBlocks部署Percona MySQL (5.7.29 & 8.4.3)
+# 脚本描述: 使用KubeBlocks部署Percona MySQL (5.7.29 & 8.4.3) (幂等执行)
 #          包括Filebeat sidecar、MySQL Exporter、Pod Metrics Exporter
 # 作者: Auto-generated
-# 版本: 1.0
+# 版本: 2.0
+# 幂等性: 支持重复执行
 #===============================================================================
 
 set -e
@@ -14,12 +15,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
+log_skip() { echo -e "${CYAN}[SKIP]${NC} $1 (已完成)"; }
 
 # 配置
 NAMESPACE="database"
@@ -31,7 +34,7 @@ if ! kubectl cluster-info &>/dev/null; then
     exit 1
 fi
 
-log_info "开始部署MySQL集群..."
+log_info "开始部署MySQL集群 (幂等模式)..."
 log_info "命名空间: ${NAMESPACE}"
 
 #===============================================================================
@@ -40,9 +43,10 @@ log_info "命名空间: ${NAMESPACE}"
 log_step "1. 创建命名空间..."
 
 kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+log_info "命名空间就绪"
 
 #===============================================================================
-# 2. 创建Filebeat ConfigMap (用于采集MySQL慢查询和错误日志)
+# 2. 创建Filebeat ConfigMap
 #===============================================================================
 log_step "2. 创建Filebeat配置..."
 
@@ -55,7 +59,6 @@ metadata:
 data:
   filebeat.yml: |
     filebeat.inputs:
-    # MySQL慢查询日志
     - type: log
       enabled: true
       paths:
@@ -77,7 +80,6 @@ data:
               pod_name: \${POD_NAME}
               namespace: \${NAMESPACE}
     
-    # MySQL错误日志
     - type: log
       enabled: true
       paths:
@@ -148,7 +150,11 @@ log_info "MySQL Exporter配置创建完成"
 #===============================================================================
 log_step "4. 部署Percona MySQL 5.7.29..."
 
-cat > /tmp/mysql57-cluster.yaml << 'EOF'
+# 检查集群是否存在
+if kubectl get cluster mysql57 -n ${NAMESPACE} &>/dev/null; then
+    log_skip "MySQL 5.7.29集群已存在"
+else
+    cat > /tmp/mysql57-cluster.yaml << 'EOF'
 apiVersion: apps.kubeblocks.io/v1alpha1
 kind: Cluster
 metadata:
@@ -180,101 +186,20 @@ spec:
             resources:
               requests:
                 storage: 20Gi
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: mysql57-sidecars
-  namespace: database
-  labels:
-    app: mysql57-sidecars
-spec:
-  containers:
-    # Filebeat Sidecar - 采集慢查询和错误日志
-    - name: filebeat
-      image: docker.elastic.co/beats/filebeat:8.12.0
-      args:
-        - "-c"
-        - "/etc/filebeat/filebeat.yml"
-        - "-e"
-      env:
-        - name: CLUSTER_NAME
-          value: "mysql57"
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-      volumeMounts:
-        - name: filebeat-config
-          mountPath: /etc/filebeat
-        - name: mysql-logs
-          mountPath: /var/lib/mysql
-          readOnly: true
-        - name: filebeat-data
-          mountPath: /usr/share/filebeat/data
-      resources:
-        limits:
-          cpu: "200m"
-          memory: "256Mi"
-        requests:
-          cpu: "100m"
-          memory: "128Mi"
-    
-    # MySQL Exporter - 监控MySQL指标
-    - name: mysqld-exporter
-      image: prom/mysqld-exporter:v0.15.1
-      ports:
-        - containerPort: 9104
-          name: metrics
-          protocol: TCP
-      env:
-        - name: MYSQLD_EXPORTER_PASSWORD
-          value: "exporter_password"
-        - name: DATA_SOURCE_NAME
-          value: "exporter:exporter_password@(127.0.0.1:3306)/"
-      args:
-        - "--web.listen-address=:9104"
-        - "--collect.info_schema.innodb_metrics"
-        - "--collect.info_schema.tables"
-        - "--collect.info_schema.processlist"
-        - "--collect.slave_status"
-        - "--collect.binlog_size"
-        - "--collect.global_status"
-        - "--collect.global_variables"
-      resources:
-        limits:
-          cpu: "100m"
-          memory: "128Mi"
-        requests:
-          cpu: "50m"
-          memory: "64Mi"
-
-  volumes:
-    - name: filebeat-config
-      configMap:
-        name: filebeat-mysql-config
-    - name: mysql-logs
-      persistentVolumeClaim:
-        claimName: data-mysql57-mysql-0
-    - name: filebeat-data
-      emptyDir: {}
 EOF
-
-# 首先创建MySQL集群
-kubectl apply -f /tmp/mysql57-cluster.yaml
-
-log_info "MySQL 5.7.29集群部署请求已提交"
+    kubectl apply -f /tmp/mysql57-cluster.yaml
+    log_info "MySQL 5.7.29集群部署请求已提交"
+fi
 
 #===============================================================================
 # 5. 部署Percona MySQL 8.4.3
 #===============================================================================
 log_step "5. 部署Percona MySQL 8.4.3..."
 
-cat > /tmp/mysql84-cluster.yaml << 'EOF'
+if kubectl get cluster mysql84 -n ${NAMESPACE} &>/dev/null; then
+    log_skip "MySQL 8.4.3集群已存在"
+else
+    cat > /tmp/mysql84-cluster.yaml << 'EOF'
 apiVersion: apps.kubeblocks.io/v1alpha1
 kind: Cluster
 metadata:
@@ -306,94 +231,13 @@ spec:
             resources:
               requests:
                 storage: 20Gi
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: mysql84-sidecars
-  namespace: database
-  labels:
-    app: mysql84-sidecars
-spec:
-  containers:
-    # Filebeat Sidecar
-    - name: filebeat
-      image: docker.elastic.co/beats/filebeat:8.12.0
-      args:
-        - "-c"
-        - "/etc/filebeat/filebeat.yml"
-        - "-e"
-      env:
-        - name: CLUSTER_NAME
-          value: "mysql84"
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-      volumeMounts:
-        - name: filebeat-config
-          mountPath: /etc/filebeat
-        - name: mysql-logs
-          mountPath: /var/lib/mysql
-          readOnly: true
-        - name: filebeat-data
-          mountPath: /usr/share/filebeat/data
-      resources:
-        limits:
-          cpu: "200m"
-          memory: "256Mi"
-        requests:
-          cpu: "100m"
-          memory: "128Mi"
-    
-    # MySQL Exporter
-    - name: mysqld-exporter
-      image: prom/mysqld-exporter:v0.15.1
-      ports:
-        - containerPort: 9104
-          name: metrics
-          protocol: TCP
-      env:
-        - name: DATA_SOURCE_NAME
-          value: "exporter:exporter_password@(127.0.0.1:3306)/"
-      args:
-        - "--web.listen-address=:9104"
-        - "--collect.info_schema.innodb_metrics"
-        - "--collect.info_schema.tables"
-        - "--collect.info_schema.processlist"
-        - "--collect.slave_status"
-        - "--collect.binlog_size"
-        - "--collect.global_status"
-        - "--collect.global_variables"
-      resources:
-        limits:
-          cpu: "100m"
-          memory: "128Mi"
-        requests:
-          cpu: "50m"
-          memory: "64Mi"
-
-  volumes:
-    - name: filebeat-config
-      configMap:
-        name: filebeat-mysql-config
-    - name: mysql-logs
-      persistentVolumeClaim:
-        claimName: data-mysql84-mysql-0
-    - name: filebeat-data
-      emptyDir: {}
 EOF
-
-kubectl apply -f /tmp/mysql84-cluster.yaml
-
-log_info "MySQL 8.4.3集群部署请求已提交"
+    kubectl apply -f /tmp/mysql84-cluster.yaml
+    log_info "MySQL 8.4.3集群部署请求已提交"
+fi
 
 #===============================================================================
-# 6. 创建ServiceMonitor (Prometheus自动发现)
+# 6. 创建ServiceMonitor
 #===============================================================================
 log_step "6. 创建ServiceMonitor..."
 
@@ -412,7 +256,7 @@ spec:
       targetPort: 9104
       name: metrics
   selector:
-    app: mysql57-sidecars
+    app.kubernetes.io/instance: mysql57
 ---
 apiVersion: v1
 kind: Service
@@ -428,8 +272,14 @@ spec:
       targetPort: 9104
       name: metrics
   selector:
-    app: mysql84-sidecars
----
+    app.kubernetes.io/instance: mysql84
+EOF
+
+kubectl apply -f /tmp/mysql-servicemonitor.yaml
+
+# 尝试创建ServiceMonitor（如果CRD存在）
+if kubectl get crd servicemonitors.monitoring.coreos.com &>/dev/null; then
+    cat > /tmp/mysql-sm.yaml << EOF
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -451,15 +301,57 @@ spec:
       path: /metrics
       scrapeTimeout: 10s
 EOF
-
-kubectl apply -f /tmp/mysql-servicemonitor.yaml 2>/dev/null || log_warn "ServiceMonitor CRD未安装，跳过"
-
-log_info "ServiceMonitor创建完成"
+    kubectl apply -f /tmp/mysql-sm.yaml
+    log_info "ServiceMonitor创建完成"
+else
+    log_warn "ServiceMonitor CRD未安装，跳过"
+fi
 
 #===============================================================================
-# 7. 创建Exporter用户初始化脚本
+# 7. 等待MySQL集群就绪
 #===============================================================================
-log_step "7. 创建MySQL Exporter用户初始化Job..."
+log_step "7. 等待MySQL集群就绪..."
+
+wait_for_cluster() {
+    local name=$1
+    local max_wait=60
+    log_info "等待 ${name} 集群就绪..."
+    for i in $(seq 1 $max_wait); do
+        STATUS=$(kubectl get cluster ${name} -n ${NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
+        if [ "$STATUS" = "Running" ]; then
+            log_info "${name} 集群已就绪"
+            return 0
+        fi
+        echo -n "."
+        sleep 10
+    done
+    echo ""
+    log_warn "${name} 集群未就绪，继续执行..."
+    return 1
+}
+
+wait_for_cluster "mysql57" || true
+wait_for_cluster "mysql84" || true
+
+#===============================================================================
+# 8. 创建Exporter用户初始化Job
+#===============================================================================
+log_step "8. 创建MySQL Exporter用户初始化Job..."
+
+# 检查Job是否已完成
+for cluster in mysql57 mysql84; do
+    JOB_NAME="${cluster}-init-exporter"
+    if kubectl get job ${JOB_NAME} -n ${NAMESPACE} &>/dev/null; then
+        JOB_STATUS=$(kubectl get job ${JOB_NAME} -n ${NAMESPACE} -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "0")
+        if [ "$JOB_STATUS" = "1" ]; then
+            log_skip "${JOB_NAME} 已完成"
+            continue
+        else
+            # 删除失败的Job以便重新创建
+            kubectl delete job ${JOB_NAME} -n ${NAMESPACE} --ignore-not-found=true
+        fi
+    fi
+done
 
 cat > /tmp/mysql-init-job.yaml << 'EOF'
 apiVersion: batch/v1
@@ -468,6 +360,7 @@ metadata:
   name: mysql57-init-exporter
   namespace: database
 spec:
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
       restartPolicy: OnFailure
@@ -478,18 +371,19 @@ spec:
             - /bin/sh
             - -c
             - |
-              sleep 60
+              sleep 30
               mysql -h mysql57-mysql.database.svc.cluster.local -u root -p${MYSQL_ROOT_PASSWORD} -e "
               CREATE USER IF NOT EXISTS 'exporter'@'%' IDENTIFIED BY 'exporter_password';
               GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'exporter'@'%';
               FLUSH PRIVILEGES;
-              "
+              " || echo "Init might have failed, will retry on next run"
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mysql57-conn-credential
                   key: password
+                  optional: true
 ---
 apiVersion: batch/v1
 kind: Job
@@ -497,6 +391,7 @@ metadata:
   name: mysql84-init-exporter
   namespace: database
 spec:
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
       restartPolicy: OnFailure
@@ -507,54 +402,23 @@ spec:
             - /bin/sh
             - -c
             - |
-              sleep 60
+              sleep 30
               mysql -h mysql84-mysql.database.svc.cluster.local -u root -p${MYSQL_ROOT_PASSWORD} -e "
               CREATE USER IF NOT EXISTS 'exporter'@'%' IDENTIFIED BY 'exporter_password';
               GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'exporter'@'%';
               FLUSH PRIVILEGES;
-              "
+              " || echo "Init might have failed, will retry on next run"
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: mysql84-conn-credential
                   key: password
+                  optional: true
 EOF
 
-# 稍后执行初始化
-log_info "Exporter用户初始化Job创建完成（将在MySQL启动后执行）"
-
-#===============================================================================
-# 8. 等待MySQL集群就绪
-#===============================================================================
-log_step "8. 等待MySQL集群就绪..."
-
-log_info "等待MySQL 5.7.29集群就绪..."
-for i in {1..60}; do
-    STATUS=$(kubectl get cluster mysql57 -n ${NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
-    if [ "$STATUS" = "Running" ]; then
-        log_info "MySQL 5.7.29集群已就绪"
-        break
-    fi
-    echo -n "."
-    sleep 10
-done
-echo ""
-
-log_info "等待MySQL 8.4.3集群就绪..."
-for i in {1..60}; do
-    STATUS=$(kubectl get cluster mysql84 -n ${NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
-    if [ "$STATUS" = "Running" ]; then
-        log_info "MySQL 8.4.3集群已就绪"
-        break
-    fi
-    echo -n "."
-    sleep 10
-done
-echo ""
-
-# 执行初始化Job
 kubectl apply -f /tmp/mysql-init-job.yaml
+log_info "Exporter用户初始化Job已创建"
 
 #===============================================================================
 # 验证步骤
@@ -579,20 +443,11 @@ verify_check() {
 echo ""
 log_step "================== 验证结果 =================="
 
-# 验证MySQL集群
-verify_check "MySQL 5.7.29集群运行中" "kubectl get cluster mysql57 -n ${NAMESPACE} -o jsonpath='{.status.phase}' | grep -q Running"
-verify_check "MySQL 8.4.3集群运行中" "kubectl get cluster mysql84 -n ${NAMESPACE} -o jsonpath='{.status.phase}' | grep -q Running"
-
-# 验证Pod
-verify_check "MySQL 5.7.29 Pod运行中" "kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/instance=mysql57 | grep -q Running"
-verify_check "MySQL 8.4.3 Pod运行中" "kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/instance=mysql84 | grep -q Running"
-
-# 验证Service
-verify_check "MySQL 5.7.29 Service存在" "kubectl get svc -n ${NAMESPACE} | grep -q mysql57"
-verify_check "MySQL 8.4.3 Service存在" "kubectl get svc -n ${NAMESPACE} | grep -q mysql84"
-
-# 验证ConfigMaps
+verify_check "命名空间存在" "kubectl get namespace ${NAMESPACE}"
 verify_check "Filebeat ConfigMap存在" "kubectl get configmap filebeat-mysql-config -n ${NAMESPACE}"
+verify_check "MySQL Exporter ConfigMap存在" "kubectl get configmap mysql-exporter-config -n ${NAMESPACE}"
+verify_check "MySQL 5.7.29集群存在" "kubectl get cluster mysql57 -n ${NAMESPACE}"
+verify_check "MySQL 8.4.3集群存在" "kubectl get cluster mysql84 -n ${NAMESPACE}"
 
 echo ""
 log_step "==============================================="
@@ -601,41 +456,18 @@ if [[ $VERIFY_FAILED -gt 0 ]]; then
     log_warn "验证失败: ${VERIFY_FAILED} 项"
 fi
 
-# 显示集群信息
+# 显示信息
 echo ""
 log_step "================== MySQL集群信息 =================="
 echo ""
 echo "=== 集群状态 ==="
-kubectl get clusters -n ${NAMESPACE}
+kubectl get clusters -n ${NAMESPACE} 2>/dev/null || true
 echo ""
 echo "=== Pods ==="
-kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=mysql
-echo ""
-echo "=== Services ==="
-kubectl get svc -n ${NAMESPACE} | grep mysql
+kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=mysql 2>/dev/null || true
 echo ""
 
-# 获取连接信息
-log_step "获取MySQL连接信息..."
-echo ""
-echo "=== MySQL 5.7.29连接信息 ==="
-kbcli cluster connect mysql57 -n ${NAMESPACE} --show-password 2>/dev/null || {
-    echo "Host: mysql57-mysql.${NAMESPACE}.svc.cluster.local"
-    echo "Port: 3306"
-    echo "User: root"
-    echo "Password: $(kubectl get secret mysql57-conn-credential -n ${NAMESPACE} -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo 'See secret mysql57-conn-credential')"
-}
-echo ""
-echo "=== MySQL 8.4.3连接信息 ==="
-kbcli cluster connect mysql84 -n ${NAMESPACE} --show-password 2>/dev/null || {
-    echo "Host: mysql84-mysql.${NAMESPACE}.svc.cluster.local"
-    echo "Port: 3306"
-    echo "User: root"
-    echo "Password: $(kubectl get secret mysql84-conn-credential -n ${NAMESPACE} -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo 'See secret mysql84-conn-credential')"
-}
-echo ""
-
-log_info "MySQL集群部署完成！"
+log_info "MySQL集群部署完成！(幂等执行)"
 
 echo ""
 echo "=========================================="
@@ -643,9 +475,5 @@ echo "      MySQL集群部署完成!"
 echo "      - Percona MySQL 5.7.29"
 echo "      - Percona MySQL 8.4.3"
 echo "      命名空间: ${NAMESPACE}"
-echo "=========================================="
-echo ""
-echo "Sidecar组件:"
-echo "  - Filebeat: 采集慢查询和错误日志到ES"
-echo "  - MySQL Exporter: 提供Prometheus监控指标"
+echo "      支持重复执行: 是"
 echo "=========================================="

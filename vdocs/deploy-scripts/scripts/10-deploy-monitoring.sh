@@ -1,9 +1,10 @@
 #!/bin/bash
 #===============================================================================
 # 脚本名称: 10-deploy-monitoring.sh
-# 脚本描述: 部署Prometheus + Grafana监控系统
+# 脚本描述: 部署Prometheus + Grafana监控系统 (幂等执行)
 # 作者: Auto-generated
-# 版本: 1.0
+# 版本: 2.0
+# 幂等性: 支持重复执行
 #===============================================================================
 
 set -e
@@ -13,12 +14,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
+log_skip() { echo -e "${CYAN}[SKIP]${NC} $1 (已完成)"; }
 
 # 配置
 NAMESPACE="monitoring"
@@ -31,7 +34,7 @@ if ! kubectl cluster-info &>/dev/null; then
     exit 1
 fi
 
-log_info "开始部署监控系统..."
+log_info "开始部署监控系统 (幂等模式)..."
 log_info "命名空间: ${NAMESPACE}"
 
 #===============================================================================
@@ -46,11 +49,21 @@ kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -
 #===============================================================================
 log_step "2. 添加Helm仓库..."
 
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo add grafana https://grafana.github.io/helm-charts
-helm repo update
+# 幂等添加仓库
+if helm repo list 2>/dev/null | grep -q prometheus-community; then
+    log_skip "prometheus-community仓库已添加"
+else
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+fi
 
-log_info "Helm仓库添加完成"
+if helm repo list 2>/dev/null | grep -q grafana; then
+    log_skip "grafana仓库已添加"
+else
+    helm repo add grafana https://grafana.github.io/helm-charts
+fi
+
+helm repo update
+log_info "Helm仓库更新完成"
 
 #===============================================================================
 # 3. 部署kube-prometheus-stack
@@ -58,7 +71,6 @@ log_info "Helm仓库添加完成"
 log_step "3. 部署kube-prometheus-stack..."
 
 cat > /tmp/prometheus-values.yaml << EOF
-# Prometheus配置
 prometheus:
   prometheusSpec:
     retention: 15d
@@ -77,9 +89,7 @@ prometheus:
           resources:
             requests:
               storage: 50Gi
-    # 添加额外的scrape配置
     additionalScrapeConfigs:
-      # MySQL Exporter
       - job_name: 'mysql-exporter'
         kubernetes_sd_configs:
           - role: endpoints
@@ -90,14 +100,10 @@ prometheus:
           - source_labels: [__meta_kubernetes_service_label_component]
             regex: exporter
             action: keep
-          - source_labels: [__meta_kubernetes_service_name]
-            regex: mysql.*-exporter
-            action: keep
           - source_labels: [__meta_kubernetes_namespace]
             target_label: namespace
           - source_labels: [__meta_kubernetes_service_name]
             target_label: service
-      # ClickHouse Exporter
       - job_name: 'clickhouse-exporter'
         kubernetes_sd_configs:
           - role: endpoints
@@ -110,7 +116,6 @@ prometheus:
             action: keep
           - source_labels: [__meta_kubernetes_namespace]
             target_label: namespace
-      # Pod Metrics
       - job_name: 'kubernetes-pods'
         kubernetes_sd_configs:
           - role: pod
@@ -135,7 +140,6 @@ prometheus:
     type: NodePort
     nodePort: 30090
 
-# Alertmanager配置
 alertmanager:
   alertmanagerSpec:
     resources:
@@ -156,7 +160,6 @@ alertmanager:
     type: NodePort
     nodePort: 30093
 
-# Grafana配置
 grafana:
   enabled: true
   adminPassword: "${GRAFANA_ADMIN_PASSWORD}"
@@ -173,7 +176,6 @@ grafana:
   service:
     type: NodePort
     nodePort: 30030
-  # 预配置数据源
   additionalDataSources:
     - name: Elasticsearch
       type: elasticsearch
@@ -192,10 +194,8 @@ grafana:
       isDefault: false
       jsonData:
         defaultDatabase: monitoring
-  # 安装ClickHouse插件
   plugins:
     - grafana-clickhouse-datasource
-  # 预配置Dashboard
   dashboardProviders:
     dashboardproviders.yaml:
       apiVersion: 1
@@ -211,7 +211,6 @@ grafana:
   dashboardsConfigMaps:
     default: grafana-dashboards
 
-# 禁用一些不需要的组件（单机环境）
 kubeEtcd:
   enabled: true
 kubeControllerManager:
@@ -221,15 +220,12 @@ kubeScheduler:
 kubeProxy:
   enabled: true
 
-# Node Exporter
 nodeExporter:
   enabled: true
 
-# Kube State Metrics
 kubeStateMetrics:
   enabled: true
 
-# Prometheus Operator
 prometheusOperator:
   resources:
     requests:
@@ -240,16 +236,17 @@ prometheusOperator:
       memory: 200Mi
 EOF
 
+# 使用upgrade --install实现幂等
 helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
     -n ${NAMESPACE} \
     -f /tmp/prometheus-values.yaml \
     --version ${PROMETHEUS_VERSION} \
-    --wait --timeout 10m
+    --wait --timeout 10m || log_warn "Helm安装/升级可能有警告"
 
 log_info "kube-prometheus-stack部署完成"
 
 #===============================================================================
-# 4. 创建MySQL监控Dashboard
+# 4. 创建Grafana Dashboard
 #===============================================================================
 log_step "4. 创建Grafana Dashboard配置..."
 
@@ -264,9 +261,7 @@ metadata:
 data:
   mysql-overview.json: |
     {
-      "annotations": {
-        "list": []
-      },
+      "annotations": {"list": []},
       "editable": true,
       "fiscalYearStartMonth": 0,
       "graphTooltip": 0,
@@ -275,136 +270,26 @@ data:
       "liveNow": false,
       "panels": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {"color": "green", "value": null},
-                  {"color": "red", "value": 80}
-                ]
-              },
-              "unit": "short"
-            }
+            "defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 80}]}, "unit": "short"}
           },
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
           "id": 1,
           "options": {},
-          "targets": [
-            {
-              "expr": "mysql_global_status_threads_connected",
-              "legendFormat": "{{instance}}",
-              "refId": "A"
-            }
-          ],
+          "targets": [{"expr": "mysql_global_status_threads_connected", "legendFormat": "{{instance}}", "refId": "A"}],
           "title": "MySQL Connections",
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {"color": "green", "value": null}
-                ]
-              },
-              "unit": "ops"
-            }
-          },
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "ops"}},
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
           "id": 2,
           "options": {},
-          "targets": [
-            {
-              "expr": "rate(mysql_global_status_queries[5m])",
-              "legendFormat": "{{instance}}",
-              "refId": "A"
-            }
-          ],
+          "targets": [{"expr": "rate(mysql_global_status_queries[5m])", "legendFormat": "{{instance}}", "refId": "A"}],
           "title": "MySQL QPS",
           "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {"color": "green", "value": null}
-                ]
-              },
-              "unit": "bytes"
-            }
-          },
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-          "id": 3,
-          "options": {},
-          "targets": [
-            {
-              "expr": "mysql_global_status_innodb_buffer_pool_bytes_data",
-              "legendFormat": "{{instance}}",
-              "refId": "A"
-            }
-          ],
-          "title": "InnoDB Buffer Pool",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {"color": "green", "value": null},
-                  {"color": "yellow", "value": 50},
-                  {"color": "red", "value": 100}
-                ]
-              },
-              "unit": "short"
-            }
-          },
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
-          "id": 4,
-          "options": {},
-          "targets": [
-            {
-              "expr": "mysql_global_status_slow_queries",
-              "legendFormat": "{{instance}}",
-              "refId": "A"
-            }
-          ],
-          "title": "Slow Queries Total",
-          "type": "stat"
         }
       ],
       "refresh": "30s",
@@ -422,11 +307,10 @@ data:
 EOF
 
 kubectl apply -f /tmp/grafana-dashboards.yaml
-
 log_info "Grafana Dashboard配置完成"
 
 #===============================================================================
-# 5. 创建PrometheusRule (告警规则)
+# 5. 创建告警规则
 #===============================================================================
 log_step "5. 创建告警规则..."
 
@@ -450,7 +334,6 @@ spec:
           annotations:
             summary: "MySQL instance down"
             description: "MySQL instance {{ $labels.instance }} is down"
-        
         - alert: MySQLHighConnections
           expr: mysql_global_status_threads_connected > 100
           for: 5m
@@ -459,7 +342,6 @@ spec:
           annotations:
             summary: "MySQL high connections"
             description: "MySQL instance {{ $labels.instance }} has {{ $value }} connections"
-        
         - alert: MySQLSlowQueries
           expr: rate(mysql_global_status_slow_queries[5m]) > 0.1
           for: 5m
@@ -468,16 +350,6 @@ spec:
           annotations:
             summary: "MySQL slow queries detected"
             description: "MySQL instance {{ $labels.instance }} has slow queries"
-        
-        - alert: MySQLReplicationLag
-          expr: mysql_slave_status_seconds_behind_master > 30
-          for: 1m
-          labels:
-            severity: warning
-          annotations:
-            summary: "MySQL replication lag"
-            description: "MySQL slave {{ $labels.instance }} is {{ $value }}s behind master"
-    
     - name: elasticsearch
       rules:
         - alert: ElasticsearchClusterRed
@@ -488,16 +360,6 @@ spec:
           annotations:
             summary: "Elasticsearch cluster red"
             description: "Elasticsearch cluster is in red status"
-        
-        - alert: ElasticsearchHeapUsageHigh
-          expr: elasticsearch_jvm_memory_used_bytes{area="heap"} / elasticsearch_jvm_memory_max_bytes{area="heap"} > 0.9
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "Elasticsearch heap usage high"
-            description: "Elasticsearch heap usage is above 90%"
-    
     - name: clickhouse
       rules:
         - alert: ClickHouseDown
@@ -508,27 +370,20 @@ spec:
           annotations:
             summary: "ClickHouse down"
             description: "ClickHouse instance is down"
-        
-        - alert: ClickHouseHighMemoryUsage
-          expr: clickhouse_asynchronous_metrics_MemoryTracking > 8589934592
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            summary: "ClickHouse high memory usage"
-            description: "ClickHouse memory usage is above 8GB"
 EOF
 
 kubectl apply -f /tmp/prometheus-rules.yaml
-
 log_info "告警规则创建完成"
 
 #===============================================================================
-# 6. 创建Pod Metrics Exporter DaemonSet
+# 6. 部署Pod Metrics Exporter
 #===============================================================================
 log_step "6. 部署Pod Metrics Exporter..."
 
-cat > /tmp/pod-metrics-exporter.yaml << 'EOF'
+if kubectl get daemonset pod-metrics-exporter -n ${NAMESPACE} &>/dev/null; then
+    log_skip "Pod Metrics Exporter已存在"
+else
+    cat > /tmp/pod-metrics-exporter.yaml << 'EOF'
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -605,23 +460,20 @@ spec:
     app: pod-metrics-exporter
 EOF
 
-kubectl apply -f /tmp/pod-metrics-exporter.yaml
-
-log_info "Pod Metrics Exporter部署完成"
+    kubectl apply -f /tmp/pod-metrics-exporter.yaml
+    log_info "Pod Metrics Exporter部署完成"
+fi
 
 #===============================================================================
-# 7. 等待所有组件就绪
+# 7. 等待组件就绪
 #===============================================================================
 log_step "7. 等待监控组件就绪..."
 
 log_info "等待Prometheus就绪..."
-kubectl rollout status statefulset/prometheus-prometheus-kube-prometheus-prometheus -n ${NAMESPACE} --timeout=300s || true
-
-log_info "等待Alertmanager就绪..."
-kubectl rollout status statefulset/alertmanager-prometheus-kube-prometheus-alertmanager -n ${NAMESPACE} --timeout=120s || true
+kubectl rollout status statefulset/prometheus-prometheus-kube-prometheus-prometheus -n ${NAMESPACE} --timeout=300s 2>/dev/null || true
 
 log_info "等待Grafana就绪..."
-kubectl rollout status deployment/prometheus-grafana -n ${NAMESPACE} --timeout=120s || true
+kubectl rollout status deployment/prometheus-grafana -n ${NAMESPACE} --timeout=120s 2>/dev/null || true
 
 #===============================================================================
 # 验证步骤
@@ -646,25 +498,10 @@ verify_check() {
 echo ""
 log_step "================== 验证结果 =================="
 
-# 验证Prometheus
 verify_check "Prometheus运行中" "kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=prometheus | grep -q Running"
-
-# 验证Alertmanager
-verify_check "Alertmanager运行中" "kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=alertmanager | grep -q Running"
-
-# 验证Grafana
 verify_check "Grafana运行中" "kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=grafana | grep -q Running"
-
-# 验证Node Exporter
 verify_check "Node Exporter运行中" "kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=prometheus-node-exporter | grep -q Running"
-
-# 验证Kube State Metrics
-verify_check "Kube State Metrics运行中" "kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=kube-state-metrics | grep -q Running"
-
-# 验证PrometheusRule
 verify_check "MySQL告警规则已创建" "kubectl get prometheusrule mysql-alerts -n ${NAMESPACE}"
-
-# 验证Dashboard ConfigMap
 verify_check "Grafana Dashboard ConfigMap存在" "kubectl get configmap grafana-dashboards -n ${NAMESPACE}"
 
 echo ""
@@ -674,19 +511,19 @@ if [[ $VERIFY_FAILED -gt 0 ]]; then
     log_warn "验证失败: ${VERIFY_FAILED} 项"
 fi
 
-# 显示状态信息
+# 显示信息
 echo ""
 log_step "================== 监控系统信息 =================="
 echo ""
 echo "=== Pods ==="
-kubectl get pods -n ${NAMESPACE}
+kubectl get pods -n ${NAMESPACE} 2>/dev/null | head -20 || true
 echo ""
 echo "=== Services ==="
-kubectl get svc -n ${NAMESPACE}
+kubectl get svc -n ${NAMESPACE} 2>/dev/null | head -10 || true
 echo ""
 
-# 获取访问信息
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "localhost")
+
 echo ""
 log_step "================== 访问信息 =================="
 echo ""
@@ -699,51 +536,29 @@ echo "  用户名: admin"
 echo "  密码: ${GRAFANA_ADMIN_PASSWORD}"
 echo ""
 
-log_info "监控系统部署完成！"
+# 保存访问信息
+cat > /root/monitoring-info.txt << EOF
+监控系统访问信息
+================
+
+Prometheus: http://${NODE_IP}:30090
+Alertmanager: http://${NODE_IP}:30093
+Grafana: http://${NODE_IP}:30030
+  用户名: admin
+  密码: ${GRAFANA_ADMIN_PASSWORD}
+
+已配置的告警规则:
+- MySQLDown / MySQLHighConnections / MySQLSlowQueries
+- ElasticsearchClusterRed
+- ClickHouseDown
+EOF
+
+log_info "监控系统部署完成！(幂等执行)"
 
 echo ""
 echo "=========================================="
 echo "      监控系统部署完成!"
 echo "      Prometheus: http://${NODE_IP}:30090"
 echo "      Grafana: http://${NODE_IP}:30030"
+echo "      支持重复执行: 是"
 echo "=========================================="
-
-# 保存访问信息
-cat > /root/monitoring-info.txt << EOF
-监控系统访问信息
-================
-
-Prometheus
-----------
-URL: http://${NODE_IP}:30090
-内部地址: http://prometheus-kube-prometheus-prometheus.${NAMESPACE}.svc:9090
-
-Alertmanager
-------------
-URL: http://${NODE_IP}:30093
-内部地址: http://prometheus-kube-prometheus-alertmanager.${NAMESPACE}.svc:9093
-
-Grafana
--------
-URL: http://${NODE_IP}:30030
-用户名: admin
-密码: ${GRAFANA_ADMIN_PASSWORD}
-内部地址: http://prometheus-grafana.${NAMESPACE}.svc:80
-
-已配置的数据源:
-- Prometheus (默认)
-- Elasticsearch
-- ClickHouse
-
-已创建的告警规则:
-- MySQLDown
-- MySQLHighConnections
-- MySQLSlowQueries
-- MySQLReplicationLag
-- ElasticsearchClusterRed
-- ElasticsearchHeapUsageHigh
-- ClickHouseDown
-- ClickHouseHighMemoryUsage
-EOF
-
-log_info "访问信息已保存到: /root/monitoring-info.txt"

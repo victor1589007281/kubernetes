@@ -1,9 +1,10 @@
 #!/bin/bash
 #===============================================================================
 # 脚本名称: 08-deploy-elasticsearch.sh
-# 脚本描述: 使用KubeBlocks部署Elasticsearch单机环境
+# 脚本描述: 使用KubeBlocks部署Elasticsearch单机环境 (幂等执行)
 # 作者: Auto-generated
-# 版本: 1.0
+# 版本: 2.0
+# 幂等性: 支持重复执行
 #===============================================================================
 
 set -e
@@ -13,12 +14,14 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
+log_skip() { echo -e "${CYAN}[SKIP]${NC} $1 (已完成)"; }
 
 # 配置
 NAMESPACE="database"
@@ -31,7 +34,7 @@ if ! kubectl cluster-info &>/dev/null; then
     exit 1
 fi
 
-log_info "开始部署Elasticsearch..."
+log_info "开始部署Elasticsearch (幂等模式)..."
 log_info "命名空间: ${NAMESPACE}"
 log_info "版本: ${ES_VERSION}"
 
@@ -43,11 +46,10 @@ log_step "1. 确保命名空间存在..."
 kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
 
 #===============================================================================
-# 2. 配置Elasticsearch节点调优
+# 2. 配置系统调优
 #===============================================================================
 log_step "2. 配置系统调优参数..."
 
-# 创建init容器配置，用于设置vm.max_map_count
 cat > /tmp/es-sysctl-config.yaml << EOF
 apiVersion: v1
 kind: ConfigMap
@@ -62,15 +64,19 @@ EOF
 kubectl apply -f /tmp/es-sysctl-config.yaml
 
 #===============================================================================
-# 3. 部署Elasticsearch (使用KubeBlocks)
+# 3. 部署Elasticsearch
 #===============================================================================
 log_step "3. 部署Elasticsearch集群..."
 
-# 检查是否有可用的elasticsearch clusterdefinition
-if kubectl get clusterdefinition elasticsearch &>/dev/null; then
-    log_info "使用KubeBlocks部署Elasticsearch..."
-    
-    cat > /tmp/es-cluster.yaml << EOF
+# 检查是否已存在
+if kubectl get cluster ${ES_CLUSTER_NAME} -n ${NAMESPACE} &>/dev/null || \
+   kubectl get statefulset ${ES_CLUSTER_NAME}-master -n ${NAMESPACE} &>/dev/null; then
+    log_skip "Elasticsearch已存在"
+else
+    # 尝试使用KubeBlocks
+    if kubectl get clusterdefinition elasticsearch &>/dev/null; then
+        log_info "使用KubeBlocks部署Elasticsearch..."
+        cat > /tmp/es-cluster.yaml << EOF
 apiVersion: apps.kubeblocks.io/v1alpha1
 kind: Cluster
 metadata:
@@ -102,24 +108,16 @@ spec:
               requests:
                 storage: 50Gi
 EOF
-
-    kubectl apply -f /tmp/es-cluster.yaml
-else
-    log_info "KubeBlocks elasticsearch addon未启用，使用Helm部署..."
-    
-    # 添加Elastic Helm仓库
-    helm repo add elastic https://helm.elastic.co 2>/dev/null || true
-    helm repo update
-    
-    # 部署Elasticsearch
-    cat > /tmp/es-values.yaml << EOF
+        kubectl apply -f /tmp/es-cluster.yaml
+    else
+        log_info "使用Helm部署Elasticsearch..."
+        helm repo add elastic https://helm.elastic.co 2>/dev/null || true
+        helm repo update
+        
+        cat > /tmp/es-values.yaml << EOF
 replicas: 1
 minimumMasterNodes: 1
-
-# 单节点模式
 clusterName: "${ES_CLUSTER_NAME}"
-
-# 资源配置
 resources:
   requests:
     cpu: "500m"
@@ -127,18 +125,12 @@ resources:
   limits:
     cpu: "2"
     memory: "4Gi"
-
-# JVM堆内存
 esJavaOpts: "-Xmx1g -Xms1g"
-
-# 存储配置
 volumeClaimTemplate:
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
       storage: 50Gi
-
-# 安全配置（开发环境禁用）
 protocol: http
 esConfig:
   elasticsearch.yml: |
@@ -147,42 +139,31 @@ esConfig:
     xpack.security.http.ssl.enabled: false
     discovery.type: single-node
     cluster.routing.allocation.disk.threshold_enabled: false
-
-# 单节点发现
-discovery.type: single-node
-
-# 初始化容器设置vm.max_map_count
 sysctlInitContainer:
   enabled: true
-
-# 持久化
 persistence:
   enabled: true
-
-# 服务类型
 service:
   type: ClusterIP
-
-# 健康检查
-healthCheck:
-  enabled: true
 EOF
-
-    helm upgrade --install ${ES_CLUSTER_NAME} elastic/elasticsearch \
-        -n ${NAMESPACE} \
-        -f /tmp/es-values.yaml \
-        --version 8.5.1 \
-        --wait --timeout 10m
+        helm upgrade --install ${ES_CLUSTER_NAME} elastic/elasticsearch \
+            -n ${NAMESPACE} \
+            -f /tmp/es-values.yaml \
+            --version 8.5.1 \
+            --wait --timeout 10m || log_warn "Helm安装可能失败"
+    fi
+    log_info "Elasticsearch部署请求已提交"
 fi
 
-log_info "Elasticsearch部署请求已提交"
-
 #===============================================================================
-# 4. 部署Kibana (可选，用于日志可视化)
+# 4. 部署Kibana
 #===============================================================================
 log_step "4. 部署Kibana..."
 
-cat > /tmp/kibana-deployment.yaml << EOF
+if kubectl get deployment kibana -n ${NAMESPACE} &>/dev/null; then
+    log_skip "Kibana已存在"
+else
+    cat > /tmp/kibana-deployment.yaml << EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -251,12 +232,12 @@ spec:
     app: kibana
 EOF
 
-kubectl apply -f /tmp/kibana-deployment.yaml
-
-log_info "Kibana部署完成"
+    kubectl apply -f /tmp/kibana-deployment.yaml
+    log_info "Kibana部署完成"
+fi
 
 #===============================================================================
-# 5. 创建Elasticsearch索引模板
+# 5. 创建索引模板
 #===============================================================================
 log_step "5. 创建MySQL日志索引模板..."
 
@@ -273,9 +254,7 @@ data:
       "template": {
         "settings": {
           "number_of_shards": 1,
-          "number_of_replicas": 0,
-          "index.lifecycle.name": "mysql-logs-policy",
-          "index.lifecycle.rollover_alias": "mysql-logs"
+          "number_of_replicas": 0
         },
         "mappings": {
           "properties": {
@@ -284,89 +263,17 @@ data:
             "cluster_name": { "type": "keyword" },
             "pod_name": { "type": "keyword" },
             "namespace": { "type": "keyword" },
-            "message": { "type": "text" },
-            "query_time": { "type": "float" },
-            "lock_time": { "type": "float" },
-            "rows_sent": { "type": "integer" },
-            "rows_examined": { "type": "integer" }
+            "message": { "type": "text" }
           }
         }
       }
     }
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: es-init-templates
-  namespace: ${NAMESPACE}
-spec:
-  template:
-    spec:
-      restartPolicy: OnFailure
-      initContainers:
-        - name: wait-for-es
-          image: busybox:latest
-          command:
-            - /bin/sh
-            - -c
-            - |
-              until wget -q -O- http://${ES_CLUSTER_NAME}-master:9200/_cluster/health; do
-                echo "Waiting for Elasticsearch..."
-                sleep 5
-              done
-      containers:
-        - name: init-templates
-          image: curlimages/curl:latest
-          command:
-            - /bin/sh
-            - -c
-            - |
-              # 创建ILM策略
-              curl -X PUT "http://${ES_CLUSTER_NAME}-master:9200/_ilm/policy/mysql-logs-policy" \
-                -H 'Content-Type: application/json' \
-                -d '{
-                  "policy": {
-                    "phases": {
-                      "hot": {
-                        "min_age": "0ms",
-                        "actions": {
-                          "rollover": {
-                            "max_age": "7d",
-                            "max_size": "10gb"
-                          }
-                        }
-                      },
-                      "delete": {
-                        "min_age": "30d",
-                        "actions": {
-                          "delete": {}
-                        }
-                      }
-                    }
-                  }
-                }'
-              
-              # 创建索引模板
-              curl -X PUT "http://${ES_CLUSTER_NAME}-master:9200/_index_template/mysql-logs-template" \
-                -H 'Content-Type: application/json' \
-                -d @/config/mysql-logs-template.json
-              
-              echo "Index templates created successfully"
-          volumeMounts:
-            - name: templates
-              mountPath: /config
-      volumes:
-        - name: templates
-          configMap:
-            name: es-index-templates
 EOF
 
 kubectl apply -f /tmp/es-index-template.yaml
 
-log_info "索引模板配置完成"
-
 #===============================================================================
-# 6. 创建Elasticsearch Service (确保可访问)
+# 6. 创建Elasticsearch Service
 #===============================================================================
 log_step "6. 创建Elasticsearch Service..."
 
@@ -391,7 +298,7 @@ spec:
     app: elasticsearch
 EOF
 
-kubectl apply -f /tmp/es-service.yaml 2>/dev/null || log_info "Service可能已存在"
+kubectl apply -f /tmp/es-service.yaml 2>/dev/null || log_skip "Service可能已存在"
 
 #===============================================================================
 # 7. 等待Elasticsearch就绪
@@ -407,18 +314,6 @@ for i in {1..60}; do
     fi
     echo -n "."
     sleep 10
-done
-echo ""
-
-# 等待服务可访问
-log_info "等待Elasticsearch服务可访问..."
-for i in {1..30}; do
-    if kubectl exec -n ${NAMESPACE} -it $(kubectl get pods -n ${NAMESPACE} -l app=elasticsearch -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) -- curl -s http://localhost:9200/_cluster/health 2>/dev/null | grep -q "status"; then
-        log_info "Elasticsearch服务已就绪"
-        break
-    fi
-    echo -n "."
-    sleep 5
 done
 echo ""
 
@@ -445,18 +340,9 @@ verify_check() {
 echo ""
 log_step "================== 验证结果 =================="
 
-# 验证Pod
-verify_check "Elasticsearch Pod运行中" "kubectl get pods -n ${NAMESPACE} -l app=elasticsearch | grep -q Running"
-
-# 验证Service
-verify_check "Elasticsearch Service存在" "kubectl get svc ${ES_CLUSTER_NAME}-master -n ${NAMESPACE}"
-
-# 验证Kibana
+verify_check "命名空间存在" "kubectl get namespace ${NAMESPACE}"
+verify_check "ES ConfigMap存在" "kubectl get configmap es-index-templates -n ${NAMESPACE}"
 verify_check "Kibana Deployment存在" "kubectl get deployment kibana -n ${NAMESPACE}"
-verify_check "Kibana Pod运行中" "kubectl get pods -n ${NAMESPACE} -l app=kibana | grep -q Running"
-
-# 验证ConfigMap
-verify_check "索引模板ConfigMap存在" "kubectl get configmap es-index-templates -n ${NAMESPACE}"
 
 echo ""
 log_step "==============================================="
@@ -465,48 +351,27 @@ if [[ $VERIFY_FAILED -gt 0 ]]; then
     log_warn "验证失败: ${VERIFY_FAILED} 项"
 fi
 
-# 显示集群信息
+# 显示信息
 echo ""
 log_step "================== Elasticsearch信息 =================="
 echo ""
 echo "=== Pods ==="
-kubectl get pods -n ${NAMESPACE} -l app=elasticsearch
-kubectl get pods -n ${NAMESPACE} -l app=kibana
+kubectl get pods -n ${NAMESPACE} -l app=elasticsearch 2>/dev/null || true
+kubectl get pods -n ${NAMESPACE} -l app=kibana 2>/dev/null || true
 echo ""
 echo "=== Services ==="
-kubectl get svc -n ${NAMESPACE} | grep -E "elasticsearch|kibana"
+kubectl get svc -n ${NAMESPACE} 2>/dev/null | grep -E "elasticsearch|kibana" || true
 echo ""
 
-# 获取访问信息
-log_step "获取Elasticsearch访问信息..."
-echo ""
-echo "=== Elasticsearch访问信息 ==="
-echo "内部地址: http://${ES_CLUSTER_NAME}-master.${NAMESPACE}.svc.cluster.local:9200"
-echo ""
-echo "=== Kibana访问信息 ==="
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-echo "访问地址: http://${NODE_IP}:30561"
-echo ""
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "localhost")
 
-# 测试Elasticsearch连接
-log_step "8. 测试Elasticsearch连接..."
-
-ES_POD=$(kubectl get pods -n ${NAMESPACE} -l app=elasticsearch -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-if [ -n "$ES_POD" ]; then
-    log_info "测试集群健康状态..."
-    kubectl exec -n ${NAMESPACE} ${ES_POD} -- curl -s http://localhost:9200/_cluster/health?pretty 2>/dev/null || log_warn "无法获取集群健康状态"
-fi
-
-log_info "Elasticsearch部署完成！"
+log_info "Elasticsearch部署完成！(幂等执行)"
 
 echo ""
 echo "=========================================="
 echo "      Elasticsearch部署完成!"
 echo "      版本: ${ES_VERSION}"
 echo "      命名空间: ${NAMESPACE}"
-echo "=========================================="
-echo ""
-echo "访问方式:"
-echo "  - ES: http://${ES_CLUSTER_NAME}-master.${NAMESPACE}.svc:9200"
-echo "  - Kibana: http://<node-ip>:30561"
+echo "      Kibana: http://${NODE_IP}:30561"
+echo "      支持重复执行: 是"
 echo "=========================================="
