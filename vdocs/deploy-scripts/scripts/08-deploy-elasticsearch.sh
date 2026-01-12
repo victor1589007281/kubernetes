@@ -5,7 +5,15 @@
 # 作者: Auto-generated
 # 版本: 2.0
 # 幂等性: 支持重复执行
+# 运行方式: sudo bash 08-deploy-elasticsearch.sh 或 sudo ./08-deploy-elasticsearch.sh
 #===============================================================================
+
+# 检查是否使用 bash 运行
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本必须使用 bash 运行"
+    echo "正确用法: sudo bash $0 或 sudo ./$0"
+    exit 1
+fi
 
 set -e
 
@@ -306,8 +314,8 @@ kubectl apply -f /tmp/es-service.yaml 2>/dev/null || log_skip "Service可能已�
 log_step "7. 等待Elasticsearch就绪..."
 
 log_info "等待Elasticsearch Pod就绪..."
-for i in {1..60}; do
-    READY=$(kubectl get pods -n ${NAMESPACE} -l app=elasticsearch -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Pending")
+for _ in {1..60}; do
+    READY=$(kubectl get pods -n "${NAMESPACE}" -l app=elasticsearch -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Pending")
     if [ "$READY" = "Running" ]; then
         log_info "Elasticsearch Pod已就绪"
         break

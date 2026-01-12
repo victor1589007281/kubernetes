@@ -5,7 +5,15 @@
 # 作者: Auto-generated
 # 版本: 2.0
 # 幂等性: 支持重复执行
+# 运行方式: sudo bash 05-setup-registry.sh 或 sudo ./05-setup-registry.sh
 #===============================================================================
+
+# 检查是否使用 bash 运行
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本必须使用 bash 运行"
+    echo "正确用法: sudo bash $0 或 sudo ./$0"
+    exit 1
+fi
 
 set -e
 
@@ -89,7 +97,7 @@ mkdir -p /etc/harbor/ssl
 cd /etc/harbor/ssl
 
 # 检查证书是否存在
-if [ -f ca.crt ] && [ -f ${REGISTRY_HOSTNAME}.crt ] && [ -f ${REGISTRY_HOSTNAME}.key ]; then
+if [ -f ca.crt ] && [ -f "${REGISTRY_HOSTNAME}.crt" ] && [ -f "${REGISTRY_HOSTNAME}.key" ]; then
     log_skip "SSL证书已存在"
 else
     # 创建CA私钥
@@ -102,13 +110,13 @@ else
         -out ca.crt
     
     # 创建服务器私钥
-    openssl genrsa -out ${REGISTRY_HOSTNAME}.key 4096
+    openssl genrsa -out "${REGISTRY_HOSTNAME}.key" 4096
     
     # 创建证书签名请求
     openssl req -sha512 -new \
         -subj "/C=CN/ST=Beijing/L=Beijing/O=K8S/OU=DevOps/CN=${REGISTRY_HOSTNAME}" \
-        -key ${REGISTRY_HOSTNAME}.key \
-        -out ${REGISTRY_HOSTNAME}.csr
+        -key "${REGISTRY_HOSTNAME}.key" \
+        -out "${REGISTRY_HOSTNAME}.csr"
     
     # 创建x509 v3扩展文件
     cat > v3.ext << EOF
@@ -129,8 +137,8 @@ EOF
     openssl x509 -req -sha512 -days 3650 \
         -extfile v3.ext \
         -CA ca.crt -CAkey ca.key -CAcreateserial \
-        -in ${REGISTRY_HOSTNAME}.csr \
-        -out ${REGISTRY_HOSTNAME}.crt
+        -in "${REGISTRY_HOSTNAME}.csr" \
+        -out "${REGISTRY_HOSTNAME}.crt"
     
     log_info "SSL证书创建完成"
 fi
@@ -140,20 +148,20 @@ fi
 #===============================================================================
 log_step "3. 配置Docker信任证书..."
 
-mkdir -p /etc/docker/certs.d/${REGISTRY_HOSTNAME}
+mkdir -p "/etc/docker/certs.d/${REGISTRY_HOSTNAME}"
 
 # 复制证书（幂等）
-cp -f ${REGISTRY_HOSTNAME}.crt /etc/docker/certs.d/${REGISTRY_HOSTNAME}/
-cp -f ${REGISTRY_HOSTNAME}.key /etc/docker/certs.d/${REGISTRY_HOSTNAME}/
-cp -f ca.crt /etc/docker/certs.d/${REGISTRY_HOSTNAME}/
+cp -f "${REGISTRY_HOSTNAME}.crt" "/etc/docker/certs.d/${REGISTRY_HOSTNAME}/"
+cp -f "${REGISTRY_HOSTNAME}.key" "/etc/docker/certs.d/${REGISTRY_HOSTNAME}/"
+cp -f ca.crt "/etc/docker/certs.d/${REGISTRY_HOSTNAME}/"
 
 # 转换证书格式
-openssl x509 -inform PEM -in ${REGISTRY_HOSTNAME}.crt \
-    -out /etc/docker/certs.d/${REGISTRY_HOSTNAME}/${REGISTRY_HOSTNAME}.cert
+openssl x509 -inform PEM -in "${REGISTRY_HOSTNAME}.crt" \
+    -out "/etc/docker/certs.d/${REGISTRY_HOSTNAME}/${REGISTRY_HOSTNAME}.cert"
 
 # 添加系统信任（幂等）
-if [ ! -f /usr/local/share/ca-certificates/${REGISTRY_HOSTNAME}.crt ]; then
-    cp ca.crt /usr/local/share/ca-certificates/${REGISTRY_HOSTNAME}.crt
+if [ ! -f "/usr/local/share/ca-certificates/${REGISTRY_HOSTNAME}.crt" ]; then
+    cp ca.crt "/usr/local/share/ca-certificates/${REGISTRY_HOSTNAME}.crt"
     update-ca-certificates
 fi
 
@@ -265,9 +273,9 @@ fi
 #===============================================================================
 log_step "9. 配置containerd信任镜像仓库..."
 
-mkdir -p /etc/containerd/certs.d/${REGISTRY_HOSTNAME}
+mkdir -p "/etc/containerd/certs.d/${REGISTRY_HOSTNAME}"
 
-cat > /etc/containerd/certs.d/${REGISTRY_HOSTNAME}/hosts.toml << EOF
+cat > "/etc/containerd/certs.d/${REGISTRY_HOSTNAME}/hosts.toml" << EOF
 server = "https://${REGISTRY_HOSTNAME}"
 
 [host."https://${REGISTRY_HOSTNAME}"]
@@ -297,14 +305,14 @@ fi
 # 使用dry-run和apply确保幂等
 if kubectl cluster-info &>/dev/null; then
     kubectl create secret docker-registry harbor-registry \
-        --docker-server=https://${REGISTRY_HOSTNAME} \
+        --docker-server="https://${REGISTRY_HOSTNAME}" \
         --docker-username=admin \
         --docker-password=Admin@123456 \
         --docker-email=admin@local \
         -n default --dry-run=client -o yaml | kubectl apply -f -
     
     kubectl create secret docker-registry harbor-registry \
-        --docker-server=https://${REGISTRY_HOSTNAME} \
+        --docker-server="https://${REGISTRY_HOSTNAME}" \
         --docker-username=admin \
         --docker-password=Admin@123456 \
         --docker-email=admin@local \
@@ -322,8 +330,8 @@ log_step "开始验证Harbor安装..."
 
 # 等待Harbor完全启动
 log_info "等待Harbor服务完全启动..."
-for i in {1..60}; do
-    if curl -ks https://${REGISTRY_HOSTNAME}/api/v2.0/health 2>/dev/null | grep -q "healthy"; then
+for _ in {1..60}; do
+    if curl -ks "https://${REGISTRY_HOSTNAME}/api/v2.0/health" 2>/dev/null | grep -q "healthy"; then
         log_info "Harbor API健康检查通过"
         break
     fi

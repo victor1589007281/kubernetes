@@ -6,7 +6,15 @@
 # 作者: Auto-generated
 # 版本: 2.0
 # 幂等性: 支持重复执行
+# 运行方式: sudo bash 07-deploy-mysql.sh 或 sudo ./07-deploy-mysql.sh
 #===============================================================================
+
+# 检查是否使用 bash 运行
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本必须使用 bash 运行"
+    echo "正确用法: sudo bash $0 或 sudo ./$0"
+    exit 1
+fi
 
 set -e
 
@@ -316,8 +324,8 @@ wait_for_cluster() {
     local name=$1
     local max_wait=60
     log_info "等待 ${name} 集群就绪..."
-    for i in $(seq 1 $max_wait); do
-        STATUS=$(kubectl get cluster ${name} -n ${NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
+    for _ in $(seq 1 "$max_wait"); do
+        STATUS=$(kubectl get cluster "${name}" -n "${NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending")
         if [ "$STATUS" = "Running" ]; then
             log_info "${name} 集群已就绪"
             return 0

@@ -5,7 +5,15 @@
 # 作者: Auto-generated
 # 版本: 2.0
 # 幂等性: 支持重复执行
+# 运行方式: sudo bash 10-deploy-monitoring.sh 或 sudo ./10-deploy-monitoring.sh
 #===============================================================================
+
+# 检查是否使用 bash 运行
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本必须使用 bash 运行"
+    echo "正确用法: sudo bash $0 或 sudo ./$0"
+    exit 1
+fi
 
 set -e
 

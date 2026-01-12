@@ -5,7 +5,15 @@
 # 作者: Auto-generated
 # 版本: 2.0
 # 幂等性: 支持重复执行
+# 运行方式: sudo bash 03-install-kubernetes.sh 或 sudo ./03-install-kubernetes.sh
 #===============================================================================
+
+# 检查是否使用 bash 运行
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本必须使用 bash 运行"
+    echo "正确用法: sudo bash $0 或 sudo ./$0"
+    exit 1
+fi
 
 set -e
 
@@ -216,10 +224,10 @@ chown root:root /root/.kube/config
 
 # 为当前用户配置
 if [ -n "$SUDO_USER" ]; then
-    USER_HOME=$(getent passwd $SUDO_USER | cut -d: -f6)
-    mkdir -p $USER_HOME/.kube
-    cp -f /etc/kubernetes/admin.conf $USER_HOME/.kube/config
-    chown -R $SUDO_USER:$SUDO_USER $USER_HOME/.kube
+    USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    mkdir -p "$USER_HOME"/.kube
+    cp -f /etc/kubernetes/admin.conf "$USER_HOME"/.kube/config
+    chown -R "$SUDO_USER":"$SUDO_USER" "$USER_HOME"/.kube
 fi
 
 # 配置kubectl自动补全（幂等：覆盖）
@@ -245,9 +253,9 @@ kubectl taint nodes --all node-role.kubernetes.io/control-plane- 2>/dev/null || 
 #===============================================================================
 log_step "8. 保存Worker节点加入命令..."
 
-mkdir -p /root/k8s-cluster${CLUSTER_ID}
-kubeadm token create --print-join-command > /root/k8s-cluster${CLUSTER_ID}/join-command.sh 2>/dev/null || true
-chmod +x /root/k8s-cluster${CLUSTER_ID}/join-command.sh 2>/dev/null || true
+mkdir -p "/root/k8s-cluster${CLUSTER_ID}"
+kubeadm token create --print-join-command > "/root/k8s-cluster${CLUSTER_ID}/join-command.sh" 2>/dev/null || true
+chmod +x "/root/k8s-cluster${CLUSTER_ID}/join-command.sh" 2>/dev/null || true
 
 log_info "Worker节点加入命令已保存到: /root/k8s-cluster${CLUSTER_ID}/join-command.sh"
 

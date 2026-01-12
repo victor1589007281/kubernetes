@@ -5,7 +5,15 @@
 # 作者: Auto-generated
 # 版本: 2.0
 # 幂等性: 支持重复执行
+# 运行方式: sudo bash 09-deploy-clickhouse.sh 或 sudo ./09-deploy-clickhouse.sh
 #===============================================================================
+
+# 检查是否使用 bash 运行
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本必须使用 bash 运行"
+    echo "正确用法: sudo bash $0 或 sudo ./$0"
+    exit 1
+fi
 
 set -e
 
@@ -405,8 +413,8 @@ fi
 log_step "5. 等待ClickHouse就绪..."
 
 log_info "等待ClickHouse Pod就绪..."
-for i in {1..60}; do
-    READY=$(kubectl get pods -n ${NAMESPACE} -l app=clickhouse -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Pending")
+for _ in {1..60}; do
+    READY=$(kubectl get pods -n "${NAMESPACE}" -l app=clickhouse -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Pending")
     if [ "$READY" = "Running" ]; then
         log_info "ClickHouse Pod已就绪"
         break

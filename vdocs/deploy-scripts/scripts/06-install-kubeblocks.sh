@@ -5,7 +5,15 @@
 # 作者: Auto-generated
 # 版本: 2.0
 # 幂等性: 支持重复执行
+# 运行方式: sudo bash 06-install-kubeblocks.sh 或 sudo ./06-install-kubeblocks.sh
 #===============================================================================
+
+# 检查是否使用 bash 运行
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本必须使用 bash 运行"
+    echo "正确用法: sudo bash $0 或 sudo ./$0"
+    exit 1
+fi
 
 set -e
 
@@ -146,7 +154,7 @@ for addon in "${ADDONS[@]}"; do
         log_skip "$addon addon已启用"
     else
         log_info "安装 $addon addon..."
-        kbcli addon enable $addon 2>/dev/null || log_warn "$addon addon安装失败或不可用"
+        kbcli addon enable "$addon" 2>/dev/null || log_warn "$addon addon安装失败或不可用"
     fi
 done
 

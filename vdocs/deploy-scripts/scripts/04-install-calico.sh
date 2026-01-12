@@ -5,7 +5,15 @@
 # 作者: Auto-generated
 # 版本: 2.0
 # 幂等性: 支持重复执行
+# 运行方式: sudo bash 04-install-calico.sh 或 sudo ./04-install-calico.sh
 #===============================================================================
+
+# 检查是否使用 bash 运行
+if [ -z "$BASH_VERSION" ]; then
+    echo "错误: 此脚本必须使用 bash 运行"
+    echo "正确用法: sudo bash $0 或 sudo ./$0"
+    exit 1
+fi
 
 set -e
 
@@ -69,8 +77,8 @@ is_calico_installed() {
 #===============================================================================
 log_step "2. 下载Calico配置文件..."
 
-mkdir -p /root/k8s-cluster${CLUSTER_ID}/calico
-cd /root/k8s-cluster${CLUSTER_ID}/calico
+mkdir -p "/root/k8s-cluster${CLUSTER_ID}/calico"
+cd "/root/k8s-cluster${CLUSTER_ID}/calico"
 
 # 只在文件不存在时下载
 if [ ! -f tigera-operator.yaml ]; then
@@ -137,7 +145,7 @@ log_step "6. 等待Calico组件就绪..."
 
 # 等待calico-system命名空间创建
 log_info "等待calico-system命名空间..."
-for i in {1..60}; do
+for _ in {1..60}; do
     if kubectl get namespace calico-system &>/dev/null; then
         log_info "calico-system命名空间已创建"
         break
