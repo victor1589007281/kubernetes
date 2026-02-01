@@ -1,0 +1,42 @@
+*******************************************************************************
+** Node IO Manager 安装成功！
+*******************************************************************************
+
+1. 获取 Pod 状态:
+   kubectl get pods -l "app.kubernetes.io/name={{ include "node-io-manager.name" . }}" -n {{ .Release.Namespace }}
+
+2. 获取服务端点:
+   kubectl get svc {{ include "node-io-manager.fullname" . }} -n {{ .Release.Namespace }}
+
+3. 查看 API (在节点上执行):
+   curl http://localhost:{{ .Values.config.apiPort }}/api/v1/summary
+
+4. 查看 Metrics:
+   curl http://localhost:{{ .Values.config.metricsPort }}/metrics
+
+5. 使用 CLI 工具 (在节点上执行):
+   iocli status           # 查看 IO 状态
+   iocli pods --top 10    # 查看 Top 10 Pod
+   iocli disks            # 查看磁盘信息
+   iocli victims          # 查看受害者
+
+{{- if .Values.aiAgent.enabled }}
+6. AI Agent 已启用:
+   - Provider: {{ .Values.aiAgent.provider.name }}
+   - Model: {{ .Values.aiAgent.provider.model }}
+   - 自动触发: {{ .Values.aiAgent.triggers.autoTrigger }}
+{{- end }}
+
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+7. Prometheus ServiceMonitor 已创建:
+   - 确保 Prometheus Operator 已安装
+   - ServiceMonitor 会自动被 Prometheus 发现
+{{- end }}
+
+{{- if .Values.grafana.dashboard.enabled }}
+8. Grafana Dashboard 已创建:
+   - Dashboard ConfigMap: {{ include "node-io-manager.fullname" . }}-grafana-dashboard
+   - 确保 Grafana sidecar 已配置自动导入 Dashboard
+{{- end }}
+
+更多文档请参考: https://github.com/node-io-manager/docs

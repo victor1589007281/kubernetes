@@ -1,0 +1,212 @@
+# Default values for node-io-manager
+# This is a YAML-formatted file
+
+# 镜像配置
+image:
+  repository: node-io-manager
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+# 镜像拉取 Secret
+imagePullSecrets: []
+
+# 名称覆盖
+nameOverride: ""
+fullnameOverride: ""
+
+# ServiceAccount 配置
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# 资源配置
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# 节点选择器
+nodeSelector: {}
+
+# 容忍
+tolerations:
+  - key: node-role.kubernetes.io/master
+    operator: Exists
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+# 亲和性
+affinity: {}
+
+# 优先级类
+priorityClassName: system-node-critical
+
+# 主机网络
+hostNetwork: true
+hostPID: true
+
+# 安全上下文
+securityContext:
+  privileged: true
+
+# Pod 安全上下文
+podSecurityContext:
+  runAsUser: 0
+  fsGroup: 0
+
+# 更新策略
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# 配置
+config:
+  # 日志级别
+  logLevel: info
+  
+  # 采集间隔
+  collectInterval: 5s
+  
+  # 是否启用 eBPF
+  enableEBPF: true
+  
+  # API 端口
+  apiPort: 9090
+  
+  # Metrics 端口
+  metricsPort: 9091
+
+# AI Agent 配置
+aiAgent:
+  enabled: true
+  
+  # LLM Provider 配置
+  provider:
+    # 默认 provider: openai, claude, gemini, qwen, ernie, zhipu, moonshot, deepseek
+    name: openai
+    
+    # API 配置 (也可通过 Secret 配置)
+    apiKey: ""
+    apiKeySecretRef:
+      name: ""
+      key: ""
+    
+    # 模型名称
+    model: gpt-4-turbo
+    
+    # API Endpoint (可选，用于私有部署)
+    endpoint: ""
+    
+    # 超时时间
+    timeout: 30s
+    
+    # 最大重试
+    maxRetries: 3
+
+  # 触发条件
+  triggers:
+    # IO 利用率阈值
+    ioUtilizationThreshold: 80
+    # 队列深度阈值
+    queueDepthThreshold: 128
+    # D状态进程阈值
+    dStateThreshold: 5
+    # 自动触发
+    autoTrigger: true
+
+# 评分系统配置
+scoring:
+  # 权重配置
+  weights:
+    businessImportance: 0.35
+    recidivismRisk: 0.25
+    actionEffectiveness: 0.25
+    urgency: 0.15
+  
+  # 观察期配置
+  observationPeriod: 5m
+  
+  # 历史数据保留
+  historyRetention: 168h
+
+# 工具箱配置
+toolbox:
+  # 是否启用自动操作
+  autoAction: false
+  
+  # 最大 IO 限制 (bytes/s)
+  maxIOLimit: "100Mi"
+  
+  # 默认 IO 限制
+  defaultIOLimit: "50Mi"
+
+# 监控配置
+monitoring:
+  # 是否启用 ServiceMonitor
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+    scrapeTimeout: 10s
+    labels: {}
+    namespace: ""
+  
+  # Prometheus Rules
+  prometheusRule:
+    enabled: false
+    labels: {}
+    rules: []
+
+# Grafana Dashboard
+grafana:
+  # 是否创建 Dashboard ConfigMap
+  dashboard:
+    enabled: true
+    labels:
+      grafana_dashboard: "1"
+
+# 存储卷
+volumes:
+  # 主机 /proc
+  hostProc:
+    hostPath: /proc
+  # 主机 /sys
+  hostSys:
+    hostPath: /sys
+  # 主机 cgroup
+  hostCgroup:
+    hostPath: /sys/fs/cgroup
+  # 配置文件
+  config:
+    mountPath: /etc/node-io-manager
+
+# 额外环境变量
+extraEnv: []
+
+# 额外卷挂载
+extraVolumes: []
+extraVolumeMounts: []
+
+# 业务优先级配置
+businessPriority:
+  # 是否启用
+  enabled: true
+  # 默认优先级
+  defaultPriority: 50
+  # 优先级配置
+  priorities:
+    - namespace: kube-system
+      priority: 100
+    - namespace: production
+      priority: 90
+    - labelSelector:
+        app.kubernetes.io/component: database
+      priority: 85
+    - namespace: development
+      priority: 30

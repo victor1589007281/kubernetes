@@ -1,0 +1,78 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "node-io-manager.fullname" . }}
+  labels:
+    {{- include "node-io-manager.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: node-io-manager.rules
+      rules:
+        # 磁盘利用率过高告警
+        - alert: HighDiskUtilization
+          expr: node_io_disk_utilization_percent > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "磁盘 {{ $labels.device }} 利用率过高"
+            description: "节点 {{ $labels.instance }} 的磁盘 {{ $labels.device }} 利用率达到 {{ $value }}%"
+        
+        # D状态进程过多告警
+        - alert: TooManyDStateProcesses
+          expr: node_io_d_state_count > 10
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "节点存在过多 D 状态进程"
+            description: "节点 {{ $labels.instance }} 有 {{ $value }} 个 D 状态进程"
+        
+        # 队列深度过高告警
+        - alert: HighQueueDepth
+          expr: node_io_disk_queue_depth > 128
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "磁盘队列深度过高"
+            description: "节点 {{ $labels.instance }} 的磁盘 {{ $labels.device }} 队列深度达到 {{ $value }}"
+        
+        # 受害者 Pod 告警
+        - alert: IOVictimDetected
+          expr: node_io_victim_count > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "检测到 IO 受害者 Pod"
+            description: "节点 {{ $labels.instance }} 有 {{ $value }} 个 Pod 受到 IO 影响"
+        
+        # 决策队列堆积告警
+        - alert: DecisionQueueBacklog
+          expr: node_io_queue_pending_count > 50
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "决策队列堆积"
+            description: "节点 {{ $labels.instance }} 的决策队列有 {{ $value }} 个待处理项"
+        
+        # 延迟过高告警
+        - alert: HighIOLatency
+          expr: node_io_disk_latency_ms{direction="write"} > 100
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "磁盘写延迟过高"
+            description: "节点 {{ $labels.instance }} 的磁盘 {{ $labels.device }} 写延迟达到 {{ $value }}ms"
+        
+        {{- with .Values.monitoring.prometheusRule.rules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

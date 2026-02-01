@@ -1,0 +1,309 @@
+# k8s_io_hang_pod.yaml
+# 用于测试 Kubernetes 在 IO hang 场景下行为的 Pod 配置
+#
+# 使用方法:
+#   kubectl apply -f k8s_io_hang_pod.yaml
+#   # 然后在节点上运行 d_state_simulator.sh 来触发 IO hang
+
+---
+# 创建专用命名空间
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: io-hang-test
+  labels:
+    purpose: io-hang-testing
+
+---
+# 测试用 PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: io-hang-test-pvc
+  namespace: io-hang-test
+spec:
+  # 修改为你的 StorageClass
+  storageClassName: local-path  # 或 standard, local-storage 等
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# 持续 IO 负载 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: io-load-generator
+  namespace: io-hang-test
+  labels:
+    app: io-load-generator
+    test: io-hang
+spec:
+  # 较长的 terminationGracePeriodSeconds 便于观察删除行为
+  terminationGracePeriodSeconds: 60
+  
+  containers:
+  - name: io-generator
+    image: busybox:1.36
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "Starting IO load generator..."
+      counter=0
+      while true; do
+        # 持续生成 IO 负载
+        dd if=/dev/zero of=/data/test_$counter bs=4k count=100 conv=fsync 2>/dev/null
+        counter=$((counter + 1))
+        
+        # 每 100 次迭代清理旧文件
+        if [ $((counter % 100)) -eq 0 ]; then
+          rm -f /data/test_* 2>/dev/null || true
+          echo "Cleaned up old files, counter: $counter"
+        fi
+        
+        sleep 0.1
+      done
+    
+    volumeMounts:
+    - name: data
+      mountPath: /data
+    
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "500m"
+    
+    # 存活探针 - 用于检测 IO hang
+    livenessProbe:
+      exec:
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # 尝试写入文件，如果 hang 会超时
+          timeout 5 dd if=/dev/zero of=/data/health_check bs=4k count=1 conv=fsync 2>/dev/null
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 10
+      failureThreshold: 3
+    
+    # 就绪探针
+    readinessProbe:
+      exec:
+        command:
+        - /bin/sh
+        - -c
+        - |
+          timeout 5 touch /data/ready_check && rm -f /data/ready_check
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 10
+  
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: io-hang-test-pvc
+  
+  # 可选: 指定调度到特定节点
+  # nodeSelector:
+  #   kubernetes.io/hostname: test-node
+
+---
+# 监控用 Pod - 观察 D 状态进程
+apiVersion: v1
+kind: Pod
+metadata:
+  name: io-monitor
+  namespace: io-hang-test
+  labels:
+    app: io-monitor
+    test: io-hang
+spec:
+  hostPID: true  # 需要访问宿主机进程
+  hostNetwork: true
+  
+  containers:
+  - name: monitor
+    image: busybox:1.36
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "Starting IO hang monitor..."
+      while true; do
+        echo ""
+        echo "========== $(date) =========="
+        
+        # 统计 D 状态进程
+        D_COUNT=$(ps aux 2>/dev/null | awk '$8 ~ /D/ {count++} END {print count+0}')
+        echo "D state processes: $D_COUNT"
+        
+        if [ "$D_COUNT" -gt 0 ]; then
+          echo ""
+          echo "D state process list:"
+          ps aux 2>/dev/null | awk 'NR==1 || $8 ~ /D/'
+        fi
+        
+        # 检查我们的 IO 生成器进程
+        echo ""
+        echo "IO generator process:"
+        ps aux 2>/dev/null | grep -E "(dd|io-load)" | grep -v grep || echo "Not found"
+        
+        sleep 5
+      done
+    
+    securityContext:
+      privileged: true
+    
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+      limits:
+        memory: "64Mi"
+        cpu: "100m"
+
+---
+# 带有 finalizer 的 Pod - 测试删除阻塞
+apiVersion: v1
+kind: Pod
+metadata:
+  name: io-with-finalizer
+  namespace: io-hang-test
+  labels:
+    app: io-with-finalizer
+    test: io-hang
+  # 注意: 这个 finalizer 会阻止 Pod 被立即删除
+  # 需要手动移除: kubectl patch pod io-with-finalizer -n io-hang-test -p '{"metadata":{"finalizers":null}}'
+  finalizers:
+  - test.io-hang/cleanup
+spec:
+  terminationGracePeriodSeconds: 30
+  
+  containers:
+  - name: io-test
+    image: busybox:1.36
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "Pod with finalizer started"
+      while true; do
+        dd if=/dev/zero of=/data/finalizer_test bs=4k count=10 conv=fsync 2>/dev/null
+        sleep 1
+      done
+    
+    volumeMounts:
+    - name: data
+      mountPath: /data
+    
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+      limits:
+        memory: "64Mi"
+        cpu: "100m"
+  
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: io-hang-test-pvc
+
+---
+# ConfigMap: 实验脚本
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: io-test-scripts
+  namespace: io-hang-test
+data:
+  cleanup.sh: |
+    #!/bin/sh
+    # 清理脚本
+    echo "Cleaning up test resources..."
+    
+    # 删除所有测试 Pod
+    kubectl delete pod -n io-hang-test --all --force --grace-period=0 2>/dev/null || true
+    
+    # 移除 finalizer
+    kubectl get pods -n io-hang-test -o name | while read pod; do
+      kubectl patch $pod -n io-hang-test -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
+    done
+    
+    # 删除 PVC
+    kubectl delete pvc -n io-hang-test --all 2>/dev/null || true
+    
+    # 删除命名空间
+    kubectl delete namespace io-hang-test 2>/dev/null || true
+    
+    echo "Cleanup complete"
+  
+  monitor.sh: |
+    #!/bin/sh
+    # 监控脚本
+    echo "Monitoring IO hang test..."
+    
+    while true; do
+      clear
+      echo "========== IO Hang Test Monitor =========="
+      echo "Time: $(date)"
+      echo ""
+      
+      echo "=== Pod Status ==="
+      kubectl get pods -n io-hang-test -o wide
+      echo ""
+      
+      echo "=== PVC Status ==="
+      kubectl get pvc -n io-hang-test
+      echo ""
+      
+      echo "=== Events ==="
+      kubectl get events -n io-hang-test --sort-by='.lastTimestamp' | tail -10
+      echo ""
+      
+      sleep 5
+    done
+
+---
+# ServiceAccount 和 RBAC (用于在 Pod 内访问 API)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: io-test-sa
+  namespace: io-hang-test
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: io-test-role
+  namespace: io-hang-test
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "pods/status"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: io-test-rolebinding
+  namespace: io-hang-test
+subjects:
+- kind: ServiceAccount
+  name: io-test-sa
+  namespace: io-hang-test
+roleRef:
+  kind: Role
+  name: io-test-role
+  apiGroup: rbac.authorization.k8s.io

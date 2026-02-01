@@ -1,0 +1,177 @@
+{{- if .Values.grafana.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "node-io-manager.fullname" . }}-grafana-dashboard
+  labels:
+    {{- include "node-io-manager.labels" . | nindent 4 }}
+    {{- with .Values.grafana.dashboard.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  node-io-manager.json: |
+    {
+      "annotations": {"list": []},
+      "description": "Node IO Manager 监控面板",
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 1,
+          "panels": [],
+          "title": "系统概览",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 70},
+                  {"color": "red", "value": 90}
+                ]
+              },
+              "unit": "percent"
+            }
+          },
+          "gridPos": {"h": 6, "w": 6, "x": 0, "y": 1},
+          "id": 2,
+          "options": {
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true
+          },
+          "targets": [
+            {
+              "expr": "avg(node_io_disk_utilization_percent{instance=~\"$instance\"})",
+              "legendFormat": "磁盘利用率"
+            }
+          ],
+          "title": "平均磁盘利用率",
+          "type": "gauge"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 5},
+                  {"color": "red", "value": 10}
+                ]
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {"h": 6, "w": 6, "x": 6, "y": 1},
+          "id": 3,
+          "targets": [
+            {
+              "expr": "node_io_d_state_count{instance=~\"$instance\"}",
+              "legendFormat": "D状态进程数"
+            }
+          ],
+          "title": "D状态进程数",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"drawStyle": "line", "fillOpacity": 10},
+              "unit": "iops"
+            }
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "id": 11,
+          "targets": [
+            {
+              "expr": "node_io_disk_iops{instance=~\"$instance\", direction=\"read\"}",
+              "legendFormat": "{{`{{device}}`}} 读"
+            },
+            {
+              "expr": "node_io_disk_iops{instance=~\"$instance\", direction=\"write\"}",
+              "legendFormat": "{{`{{device}}`}} 写"
+            }
+          ],
+          "title": "磁盘 IOPS",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"drawStyle": "line", "fillOpacity": 10},
+              "unit": "Bps"
+            }
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "id": 12,
+          "targets": [
+            {
+              "expr": "node_io_disk_bps{instance=~\"$instance\", direction=\"read\"}",
+              "legendFormat": "{{`{{device}}`}} 读"
+            },
+            {
+              "expr": "node_io_disk_bps{instance=~\"$instance\", direction=\"write\"}",
+              "legendFormat": "{{`{{device}}`}} 写"
+            }
+          ],
+          "title": "磁盘吞吐量",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["kubernetes", "io", "node-io-manager"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "includeAll": false,
+            "label": "数据源",
+            "name": "datasource",
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          },
+          {
+            "allValue": ".*",
+            "current": {},
+            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            "definition": "label_values(node_io_disk_iops, instance)",
+            "hide": 0,
+            "includeAll": true,
+            "label": "节点",
+            "name": "instance",
+            "query": {"query": "label_values(node_io_disk_iops, instance)"},
+            "refresh": 2,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Node IO Manager",
+      "uid": "node-io-manager",
+      "version": 1
+    }
+{{- end }}

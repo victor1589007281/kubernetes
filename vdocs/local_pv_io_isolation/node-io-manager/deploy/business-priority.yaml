@@ -1,0 +1,154 @@
+# 业务优先级配置示例
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-io-manager-business-priority
+  namespace: node-io-manager
+data:
+  business-priority.yaml: |
+    # 业务优先级配置
+    # 用于在对 Pod 采取 IO 限制操作时进行评分
+    
+    # 命名空间级别优先级
+    namespaces:
+      # 系统命名空间 - 最高保护
+      kube-system:
+        priority: 100
+        protectionLevel: critical
+      
+      # 生产环境 - 高保护
+      production:
+        priority: 90
+        protectionLevel: high
+      prod:
+        priority: 90
+        protectionLevel: high
+      
+      # 预发布环境 - 中等保护
+      staging:
+        priority: 50
+        protectionLevel: medium
+      pre-prod:
+        priority: 50
+        protectionLevel: medium
+      
+      # 开发测试环境 - 低保护
+      dev:
+        priority: 20
+        protectionLevel: low
+      test:
+        priority: 20
+        protectionLevel: low
+      development:
+        priority: 20
+        protectionLevel: low
+      
+      # 默认命名空间
+      default:
+        priority: 30
+        protectionLevel: low
+    
+    # 标签规则优先级
+    labelRules:
+      # 数据库类应用 - 高保护
+      - selector:
+          matchLabels:
+            app.kubernetes.io/tier: database
+        priority: 90
+        protectionLevel: high
+      
+      - selector:
+          matchLabels:
+            app.kubernetes.io/component: database
+        priority: 90
+        protectionLevel: high
+      
+      # 缓存类应用 - 高保护
+      - selector:
+          matchLabels:
+            app.kubernetes.io/tier: cache
+        priority: 80
+        protectionLevel: high
+      
+      - selector:
+          matchLabels:
+            app.kubernetes.io/component: redis
+        priority: 80
+        protectionLevel: high
+      
+      # 消息队列 - 高保护
+      - selector:
+          matchLabels:
+            app.kubernetes.io/component: kafka
+        priority: 85
+        protectionLevel: high
+      
+      - selector:
+          matchLabels:
+            app.kubernetes.io/component: rabbitmq
+        priority: 85
+        protectionLevel: high
+      
+      # 核心服务 - 高保护
+      - selector:
+          matchLabels:
+            app.kubernetes.io/tier: api
+        priority: 75
+        protectionLevel: high
+      
+      # 批处理任务 - 低保护
+      - selector:
+          matchLabels:
+            batch: "true"
+        priority: 30
+        protectionLevel: low
+      
+      - selector:
+          matchExpressions:
+            - key: job-name
+              operator: Exists
+        priority: 25
+        protectionLevel: low
+      
+      # 开发/调试 Pod - 低保护
+      - selector:
+          matchLabels:
+            purpose: debugging
+        priority: 10
+        protectionLevel: low
+    
+    # 特定 Pod 覆盖配置
+    podOverrides:
+      # 关键数据库实例 - 永不限流
+      - namespace: production
+        namePattern: "mysql-master-*"
+        priority: 100
+        protectionLevel: critical
+        neverThrottle: true
+      
+      - namespace: production
+        namePattern: "postgresql-primary-*"
+        priority: 100
+        protectionLevel: critical
+        neverThrottle: true
+      
+      # ETCD 集群 - 永不限流
+      - namespace: kube-system
+        namePattern: "etcd-*"
+        priority: 100
+        protectionLevel: critical
+        neverThrottle: true
+      
+      # 监控组件 - 高保护
+      - namespace: monitoring
+        namePattern: "prometheus-*"
+        priority: 85
+        protectionLevel: high
+        neverThrottle: false
+      
+      # 日志采集器 - 可以限流
+      - namespace: logging
+        namePattern: "fluentd-*"
+        priority: 40
+        protectionLevel: medium
+        neverThrottle: false

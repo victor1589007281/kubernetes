@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "node-io-manager.fullname" . }}-config
+  labels:
+    {{- include "node-io-manager.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    # Node IO Manager 配置
+    logLevel: {{ .Values.config.logLevel }}
+    
+    # 采集器配置
+    collector:
+      interval: {{ .Values.config.collectInterval }}
+      enableEBPF: {{ .Values.config.enableEBPF }}
+      procPath: /host/proc
+      sysPath: /host/sys
+      cgroupPath: /host/sys/fs/cgroup
+    
+    # API 配置
+    api:
+      port: {{ .Values.config.apiPort }}
+      enableCORS: true
+    
+    # Metrics 配置
+    metrics:
+      port: {{ .Values.config.metricsPort }}
+      path: /metrics
+    
+    # AI Agent 配置
+    aiAgent:
+      enabled: {{ .Values.aiAgent.enabled }}
+      provider:
+        name: {{ .Values.aiAgent.provider.name }}
+        model: {{ .Values.aiAgent.provider.model }}
+        {{- if .Values.aiAgent.provider.endpoint }}
+        endpoint: {{ .Values.aiAgent.provider.endpoint }}
+        {{- end }}
+        timeout: {{ .Values.aiAgent.provider.timeout }}
+        maxRetries: {{ .Values.aiAgent.provider.maxRetries }}
+      triggers:
+        ioUtilizationThreshold: {{ .Values.aiAgent.triggers.ioUtilizationThreshold }}
+        queueDepthThreshold: {{ .Values.aiAgent.triggers.queueDepthThreshold }}
+        dStateThreshold: {{ .Values.aiAgent.triggers.dStateThreshold }}
+        autoTrigger: {{ .Values.aiAgent.triggers.autoTrigger }}
+    
+    # 评分系统配置
+    scoring:
+      weights:
+        businessImportance: {{ .Values.scoring.weights.businessImportance }}
+        recidivismRisk: {{ .Values.scoring.weights.recidivismRisk }}
+        actionEffectiveness: {{ .Values.scoring.weights.actionEffectiveness }}
+        urgency: {{ .Values.scoring.weights.urgency }}
+      observationPeriod: {{ .Values.scoring.observationPeriod }}
+      historyRetention: {{ .Values.scoring.historyRetention }}
+    
+    # 工具箱配置
+    toolbox:
+      autoAction: {{ .Values.toolbox.autoAction }}
+      maxIOLimit: {{ .Values.toolbox.maxIOLimit }}
+      defaultIOLimit: {{ .Values.toolbox.defaultIOLimit }}
+    
+    # 业务优先级配置
+    businessPriority:
+      enabled: {{ .Values.businessPriority.enabled }}
+      defaultPriority: {{ .Values.businessPriority.defaultPriority }}
+      {{- if .Values.businessPriority.priorities }}
+      priorities:
+        {{- toYaml .Values.businessPriority.priorities | nindent 8 }}
+      {{- end }}

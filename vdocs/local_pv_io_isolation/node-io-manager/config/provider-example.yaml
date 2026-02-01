@@ -1,0 +1,204 @@
+# Node IO Manager - LLM Provider 配置示例
+# 支持国内外主流大模型
+
+# 默认使用的 Provider
+default: qwen  # 可选: openai, claude, gemini, qwen, ernie, zhipu, moonshot, deepseek 等
+
+# ==================== 国外大模型 ====================
+
+# OpenAI
+openai:
+  enabled: false
+  model: gpt-4-turbo-preview
+  apiKey: ${OPENAI_API_KEY}  # 从环境变量读取
+  baseURL: https://api.openai.com/v1  # 可选，用于代理
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# Azure OpenAI
+azureOpenai:
+  enabled: false
+  model: gpt-4
+  apiKey: ${AZURE_OPENAI_API_KEY}
+  baseURL: https://your-resource.openai.azure.com
+  azureDeployment: gpt-4
+  azureApiVersion: "2024-02-15-preview"
+  maxTokens: 4096
+  timeout: 120
+
+# Anthropic Claude
+claude:
+  enabled: false
+  model: claude-3-opus-20240229
+  apiKey: ${ANTHROPIC_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# Google Gemini
+gemini:
+  enabled: false
+  model: gemini-pro
+  apiKey: ${GOOGLE_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# Mistral AI
+mistral:
+  enabled: false
+  model: mistral-large-latest
+  apiKey: ${MISTRAL_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# Cohere
+cohere:
+  enabled: false
+  model: command-r-plus
+  apiKey: ${COHERE_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# Groq (高速推理)
+groq:
+  enabled: false
+  model: mixtral-8x7b-32768
+  apiKey: ${GROQ_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 60  # Groq 很快
+
+# Together AI
+together:
+  enabled: false
+  model: mistralai/Mixtral-8x7B-Instruct-v0.1
+  apiKey: ${TOGETHER_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# Ollama (本地)
+ollama:
+  enabled: true
+  model: qwen2:7b
+  baseURL: http://localhost:11434
+  timeout: 300  # 本地模型可能较慢
+
+# ==================== 国内大模型 ====================
+
+# 通义千问 (阿里云 DashScope)
+qwen:
+  enabled: true
+  model: qwen-max
+  apiKey: ${DASHSCOPE_API_KEY}
+  baseURL: https://dashscope.aliyuncs.com/api/v1
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 文心一言 (百度)
+ernie:
+  enabled: false
+  model: ernie-4.0-8k
+  apiKey: ${BAIDU_API_KEY}      # 百度 API Key
+  secretKey: ${BAIDU_SECRET_KEY}  # 百度 Secret Key
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 智谱 ChatGLM
+zhipu:
+  enabled: false
+  model: glm-4
+  apiKey: ${ZHIPU_API_KEY}  # 格式: {api_key}.{secret}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 讯飞星火
+spark:
+  enabled: false
+  model: spark-v3.5
+  apiKey: ${SPARK_API_KEY}
+  secretKey: ${SPARK_API_SECRET}
+  baseURL: https://spark-api-open.xf-yun.com/v1
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 月之暗面 Moonshot/Kimi
+moonshot:
+  enabled: false
+  model: moonshot-v1-128k
+  apiKey: ${MOONSHOT_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 深度求索 DeepSeek
+deepseek:
+  enabled: false
+  model: deepseek-chat
+  apiKey: ${DEEPSEEK_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 百川
+baichuan:
+  enabled: false
+  model: Baichuan4
+  apiKey: ${BAICHUAN_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# MiniMax
+minimax:
+  enabled: false
+  model: abab6.5-chat
+  apiKey: ${MINIMAX_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 零一万物 Yi
+yi:
+  enabled: false
+  model: yi-large
+  apiKey: ${YI_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 豆包 (字节)
+doubao:
+  enabled: false
+  model: doubao-pro-32k
+  apiKey: ${DOUBAO_API_KEY}
+  baseURL: https://ark.cn-beijing.volces.com/api/v3
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 混元 (腾讯)
+hunyuan:
+  enabled: false
+  model: hunyuan-pro
+  apiKey: ${HUNYUAN_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120
+
+# 商汤日日新
+sensenova:
+  enabled: false
+  model: SenseChat-5
+  apiKey: ${SENSENOVA_API_KEY}
+  maxTokens: 4096
+  temperature: 0.7
+  timeout: 120

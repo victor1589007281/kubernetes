@@ -1,0 +1,273 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: node-io-manager
+  labels:
+    app.kubernetes.io/name: node-io-manager
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-io-manager
+  namespace: node-io-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-io-manager
+rules:
+  # 读取 Pod 信息
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # 读取和更新节点信息
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # 读取 PVC/PV 信息
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  # 创建事件
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # 读取 ConfigMap
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-io-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-io-manager
+subjects:
+  - kind: ServiceAccount
+    name: node-io-manager
+    namespace: node-io-manager
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-io-manager-config
+  namespace: node-io-manager
+data:
+  config.yaml: |
+    logLevel: info
+    
+    collector:
+      intervalSeconds: 5
+      enableBlktrace: false
+      enableEBPF: false
+      procPath: /host/proc
+      sysPath: /host/sys
+      cgroupPath: /host/sys/fs/cgroup
+    
+    metrics:
+      enabled: true
+      port: 9100
+      path: /metrics
+    
+    api:
+      port: 8080
+      readTimeout: 30
+      writeTimeout: 30
+      enableCORS: true
+    
+    profile:
+      intervalSeconds: 10
+      windowSize: 60
+      retentionHours: 24
+    
+    analyzer:
+      zScoreThreshold: 2.0
+      correlationMinimum: 0.6
+      victimScoreThreshold: 0.5
+      enableML: false
+    
+    scoring:
+      intervalSeconds: 10
+      weights:
+        businessImportance: 0.3
+        historyBehavior: 0.2
+        actionEffect: 0.3
+        currentImpact: 0.2
+      recidivismBaseRate: 0.1
+      recidivismDecayHours: 24
+    
+    queue:
+      maxPendingItems: 100
+      processIntervalSec: 5
+      scoreDecayMinutes: 10
+    
+    observation:
+      defaultDuration: 5m
+      minDuration: 1m
+      maxDuration: 30m
+      successCriteria:
+        - metric: disk_util
+          operator: "<"
+          threshold: 80
+          duration: 3m
+    
+    agent:
+      enabled: false
+      provider: openai
+      maxIterations: 10
+      timeout: 5m
+    
+    toolbox:
+      enableIOLimit: true
+      enableSchedule: true
+      enableAlert: true
+      dryRun: false
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-io-manager
+  namespace: node-io-manager
+  labels:
+    app.kubernetes.io/name: node-io-manager
+    app.kubernetes.io/component: daemon
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: node-io-manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: node-io-manager
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: node-io-manager
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      containers:
+        - name: manager
+          image: node-io-manager:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config=/etc/node-io-manager/config.yaml
+            - --log-level=info
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # AI Agent 配置 (可选)
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: node-io-manager-secrets
+                  key: openai-api-key
+                  optional: true
+          ports:
+            - name: metrics
+              containerPort: 9100
+              protocol: TCP
+            - name: api
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: config
+              mountPath: /etc/node-io-manager
+              readOnly: true
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: host-sys
+              mountPath: /host/sys
+              readOnly: false
+            - name: cgroup
+              mountPath: /host/sys/fs/cgroup
+              readOnly: false
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/ready
+              port: api
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: node-io-manager-config
+        - name: host-proc
+          hostPath:
+            path: /proc
+        - name: host-sys
+          hostPath:
+            path: /sys
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-io-manager
+  namespace: node-io-manager
+  labels:
+    app.kubernetes.io/name: node-io-manager
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 8080
+      targetPort: api
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: node-io-manager
+---
+# ServiceMonitor for Prometheus Operator (可选)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: node-io-manager
+  namespace: node-io-manager
+  labels:
+    app.kubernetes.io/name: node-io-manager
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: node-io-manager
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
